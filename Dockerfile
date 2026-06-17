@@ -860,5 +860,5 @@ document.addEventListener('DOMContentLoaded', () => {
 </html>
 HTMLEOF
 
-EXPOSE 8000
+EXPOSE 10000
 CMD ["python", "/app/main.py"]
