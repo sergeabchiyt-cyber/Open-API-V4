@@ -91,12 +91,11 @@ from concurrent.futures import ThreadPoolExecutor
 app = FastAPI(title="CoinGlass Decrypt Dashboard")
 executor = ThreadPoolExecutor(max_workers=4)
 
-app.mount("/static", StaticFiles(directory="/app/static", check_dir=False), name="static")
 templates = Jinja2Templates(directory="/app/templates")
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse(request, "index.html", {})
 
 @app.get("/api/rsi")
 async def get_rsi():
@@ -173,11 +172,11 @@ async def get_futures_stats():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=10000)
 PYEOF
 
 # ==== Create directories ====
-RUN mkdir -p /app/static /app/templates
+RUN mkdir -p /app/templates
 
 # ==== Beautiful Frontend HTML ====
 RUN cat <<'HTMLEOF' > /app/templates/index.html
@@ -219,6 +218,8 @@ RUN cat <<'HTMLEOF' > /app/templates/index.html
     overflow-x: hidden;
   }
   .mono { font-family: 'JetBrains Mono', monospace; }
+
+  /* Animated background grid */
   .bg-grid {
     position: fixed;
     top: 0; left: 0; right: 0; bottom: 0;
@@ -253,6 +254,8 @@ RUN cat <<'HTMLEOF' > /app/templates/index.html
     0%, 100% { transform: translate(0, 0); }
     50% { transform: translate(30px, 30px); }
   }
+
+  /* Glassmorphism cards */
   .glass-card {
     background: rgba(26, 31, 46, 0.7);
     backdrop-filter: blur(20px);
@@ -265,19 +268,27 @@ RUN cat <<'HTMLEOF' > /app/templates/index.html
     box-shadow: 0 0 30px rgba(0, 212, 170, 0.08), 0 8px 32px rgba(0,0,0,0.3);
     transform: translateY(-2px);
   }
+
+  /* Scrollbar */
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: #2d3748; border-radius: 3px; }
   ::-webkit-scrollbar-thumb:hover { background: #4a5568; }
+
+  /* Animations */
   @keyframes fadeInUp {
     from { opacity: 0; transform: translateY(20px); }
     to { opacity: 1; transform: translateY(0); }
   }
-  .animate-in { animation: fadeInUp 0.6s ease-out forwards; }
+  .animate-in {
+    animation: fadeInUp 0.6s ease-out forwards;
+  }
   .delay-1 { animation-delay: 0.1s; }
   .delay-2 { animation-delay: 0.2s; }
   .delay-3 { animation-delay: 0.3s; }
   .delay-4 { animation-delay: 0.4s; }
+
+  /* Loading shimmer */
   @keyframes shimmer {
     0% { background-position: -200% 0; }
     100% { background-position: 200% 0; }
@@ -287,11 +298,15 @@ RUN cat <<'HTMLEOF' > /app/templates/index.html
     background-size: 200% 100%;
     animation: shimmer 1.5s infinite;
   }
+
+  /* Tab active state */
   .tab-active {
     background: rgba(0, 212, 170, 0.15);
     color: var(--accent);
     border: 1px solid rgba(0, 212, 170, 0.3);
   }
+
+  /* Table row hover */
   .table-row {
     transition: background 0.2s;
     border-bottom: 1px solid rgba(45, 55, 72, 0.4);
@@ -299,19 +314,33 @@ RUN cat <<'HTMLEOF' > /app/templates/index.html
   .table-row:hover {
     background: rgba(0, 212, 170, 0.04);
   }
+
+  /* Status dot pulse */
   @keyframes pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.5; }
   }
-  .pulse-dot { animation: pulse 2s ease-in-out infinite; }
-  .count-up { transition: all 0.5s ease-out; }
+  .pulse-dot {
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  /* Number counter animation */
+  .count-up {
+    transition: all 0.5s ease-out;
+  }
+
+  /* Gradient text */
   .gradient-text {
     background: linear-gradient(135deg, #00d4aa 0%, #6366f1 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
   }
-  .tooltip { position: relative; }
+
+  /* Tooltip */
+  .tooltip {
+    position: relative;
+  }
   .tooltip::after {
     content: attr(data-tip);
     position: absolute;
@@ -330,6 +359,8 @@ RUN cat <<'HTMLEOF' > /app/templates/index.html
     z-index: 100;
   }
   .tooltip:hover::after { opacity: 1; }
+
+  /* Responsive */
   @media (max-width: 768px) {
     .hide-mobile { display: none; }
   }
@@ -430,6 +461,7 @@ RUN cat <<'HTMLEOF' > /app/templates/index.html
             <canvas id="rsiChart"></canvas>
           </div>
         </div>
+
         <div class="glass-card p-6">
           <h2 class="text-lg font-semibold mb-4">Extreme RSI</h2>
           <div class="space-y-3" id="extremeRsi">
@@ -439,6 +471,7 @@ RUN cat <<'HTMLEOF' > /app/templates/index.html
           </div>
         </div>
       </div>
+
       <div class="glass-card mt-6 overflow-hidden">
         <div class="p-4 border-b border-[#2d3748]/60 flex items-center justify-between">
           <h2 class="text-lg font-semibold">All Coins RSI</h2>
@@ -542,10 +575,12 @@ RUN cat <<'HTMLEOF' > /app/templates/index.html
 </div>
 
 <script>
+// === Global State ===
 let allRsiData = [];
 let currentRsiSort = 'rsi4h';
 let charts = {};
 
+// === Tab Switching ===
 function switchTab(tab) {
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.add('hidden'));
   document.getElementById('panel-' + tab).classList.remove('hidden');
@@ -555,6 +590,7 @@ function switchTab(tab) {
   });
   document.getElementById('tab-' + tab).classList.add('tab-active');
   document.getElementById('tab-' + tab).classList.remove('text-[#94a3b8]');
+
   if (tab === 'funding' && !window.fundingLoaded) { loadFunding(); window.fundingLoaded = true; }
   if (tab === 'liquidation' && !window.liqLoaded) { loadLiquidation(); window.liqLoaded = true; }
   if (tab === 'marketcap' && !window.mcLoaded) { loadMarketcap(); window.mcLoaded = true; }
@@ -562,6 +598,7 @@ function switchTab(tab) {
   if (tab === 'etf' && !window.etfLoaded) { loadEtf(); window.etfLoaded = true; }
 }
 
+// === RSI Helpers ===
 function getRsiColor(val) {
   const v = parseFloat(val);
   if (v >= 70) return '#ef4444';
@@ -595,11 +632,13 @@ function formatNumber(n) {
   return num.toFixed(2);
 }
 
+// === Load RSI Data ===
 async function loadRsi() {
   try {
     const res = await fetch('/api/rsi');
     const json = await res.json();
     if (!json.success) throw new Error(json.error);
+
     allRsiData = json.data.list || [];
     document.getElementById('statTotalCoins').textContent = allRsiData.length;
     const high = allRsiData.filter(c => parseFloat(c.rsi4h || 0) >= 70);
@@ -611,10 +650,12 @@ async function loadRsi() {
     document.getElementById('statOverbought').textContent = high.length;
     document.getElementById('statOversold').textContent = low.length;
     document.getElementById('statNeutral').textContent = neutral.length;
+
     renderRsiTable(allRsiData);
     renderExtremeRsi(high.slice(0, 5), low.slice(0, 5));
     renderRsiChart(allRsiData);
     document.getElementById('rsiCount').textContent = allRsiData.length + ' coins';
+
     const now = new Date();
     document.getElementById('lastUpdate').textContent = now.toLocaleTimeString();
   } catch (e) {
@@ -671,6 +712,7 @@ function renderExtremeRsi(high, low) {
       </div>
     `).join('');
   }
+
   if (low.length > 0) {
     html += '<div class="text-xs text-[#22c55e] font-medium uppercase tracking-wider mb-2 mt-4">Oversold (RSI ≤ 30)</div>';
     html += low.map(c => `
@@ -683,12 +725,14 @@ function renderExtremeRsi(high, low) {
       </div>
     `).join('');
   }
+
   container.innerHTML = html || '<div class="text-[#64748b] text-sm">No extreme values</div>';
 }
 
 function renderRsiChart(data) {
   const ctx = document.getElementById('rsiChart').getContext('2d');
   const sorted = [...data].sort((a,b) => parseFloat(b.rsi4h || 0) - parseFloat(a.rsi4h || 0)).slice(0, 20);
+
   if (charts.rsi) charts.rsi.destroy();
   charts.rsi = new Chart(ctx, {
     type: 'bar',
@@ -758,11 +802,13 @@ function filterRsiTable() {
   document.getElementById('rsiCount').textContent = filtered.length + ' coins';
 }
 
+// === Load Funding ===
 async function loadFunding() {
   try {
     const res = await fetch('/api/funding');
     const json = await res.json();
     if (!json.success) throw new Error(json.error);
+
     const tbody = document.getElementById('fundingTableBody');
     const data = json.data.list || [];
     tbody.innerHTML = data.slice(0, 50).map(item => {
@@ -780,11 +826,13 @@ async function loadFunding() {
   }
 }
 
+// === Load Liquidation ===
 async function loadLiquidation() {
   try {
     const res = await fetch('/api/liquidation');
     const json = await res.json();
     if (!json.success) throw new Error(json.error);
+
     const data = json.data;
     const container = document.getElementById('liquidationContent');
     container.innerHTML = `<pre class="text-xs text-[#94a3b8] mono overflow-auto max-h-96">${JSON.stringify(data, null, 2)}</pre>`;
@@ -793,11 +841,13 @@ async function loadLiquidation() {
   }
 }
 
+// === Load Market Cap ===
 async function loadMarketcap() {
   try {
     const res = await fetch('/api/marketcap');
     const json = await res.json();
     if (!json.success) throw new Error(json.error);
+
     const tbody = document.getElementById('marketcapTableBody');
     const data = json.data.list || [];
     tbody.innerHTML = data.slice(0, 50).map((item, i) => {
@@ -821,11 +871,13 @@ async function loadMarketcap() {
   }
 }
 
+// === Load Futures Stats ===
 async function loadFutures() {
   try {
     const res = await fetch('/api/futures-stats');
     const json = await res.json();
     if (!json.success) throw new Error(json.error);
+
     const data = json.data;
     const grid = document.getElementById('futuresStatsGrid');
     grid.innerHTML = Object.entries(data).map(([key, val]) => `
@@ -839,11 +891,13 @@ async function loadFutures() {
   }
 }
 
+// === Load ETF ===
 async function loadEtf() {
   try {
     const res = await fetch('/api/etf');
     const json = await res.json();
     if (!json.success) throw new Error(json.error);
+
     const container = document.getElementById('etfContent');
     container.innerHTML = `<pre class="text-xs text-[#94a3b8] mono overflow-auto max-h-96">${JSON.stringify(json.data, null, 2)}</pre>`;
   } catch (e) {
@@ -851,8 +905,10 @@ async function loadEtf() {
   }
 }
 
+// === Init ===
 document.addEventListener('DOMContentLoaded', () => {
   loadRsi();
+  // Auto refresh every 60s
   setInterval(loadRsi, 60000);
 });
 </script>
