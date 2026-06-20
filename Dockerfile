@@ -586,11 +586,21 @@ async function loadMC() {
     document.getElementById('mcDebug').innerText = JSON.stringify(json.data, null, 2);
     let d = extractArr(json.data);
     
-    // Filter out traditional assets (Gold, NVDA, AAPL, etc.) that CoinGlass includes for comparison
-    const blacklist = ['Gold', 'Silver', 'Apple', 'Microsoft', 'NVIDIA', 'Amazon', 'Google', 'Meta', 'Tesla', 'S&P 500', 'SPY', 'Alphabet', 'Berkshire'];
+    // 1. Create a strict whitelist from our 100% crypto RSI endpoint
+    const cryptoWhitelist = new Set(allRsi.map(c => gv(c, ['symbol','s'], '').toUpperCase()));
+    
+    // 2. Comprehensive blacklist of traditional assets that CoinGlass includes
+    const stockBlacklist = ['GOLD', 'SILVER', 'APPLE', 'MICROSOFT', 'NVIDIA', 'NVDA', 'AMAZON', 'AMZN', 'GOOGLE', 'GOOGL', 'META', 'FB', 'TESLA', 'TSLA', 'S&P', 'SPY', 'SPX', 'ALPHABET', 'BERKSHIRE', 'BRK', 'PLATINUM', 'PALLADIUM', 'NIKKEI', 'DOW', 'DJI', 'NASDAQ', 'COMP', 'RUSSELL', 'RUT', 'FTSE', 'DAX', 'CAC', 'HANG', 'SHANGHAI', 'OIL', 'CRUDE', 'BRENT'];
+    
+    // 3. Filter out anything not in the crypto whitelist, or explicitly in the blacklist
     d = d.filter(c => {
-      const name = gv(c, ['name', 'symbol', 'code', 's'], '').toLowerCase();
-      return !blacklist.some(b => name.includes(b.toLowerCase()));
+      const sym = gv(c, ['symbol','code','s','name'], '').toUpperCase();
+      if (stockBlacklist.some(b => sym.includes(b))) return false;
+      // If RSI list is loaded, ONLY allow assets present in that list
+      if (cryptoWhitelist.size > 0) {
+        return cryptoWhitelist.has(sym);
+      }
+      return false; // If RSI hasn't loaded yet, don't show potentially fake stocks
     });
     
     document.getElementById('mcTable').innerHTML = d.map((c,i) => `
@@ -710,7 +720,7 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
         <span class="method-get mono text-xs font-bold px-2 py-1 rounded">GET</span>
         <code class="mono text-sm text-[var(--accent)]">/api/marketcap</code>
       </div>
-      <p class="text-sm text-[var(--text-muted)] mb-4">Market cap rankings for the top 100 cryptocurrencies (traditional assets like Gold/NVDA are filtered out).</p>
+      <p class="text-sm text-[var(--text-muted)] mb-4">Market cap rankings for the top 100 cryptocurrencies (traditional assets like Gold/NVDA/SPX are strictly filtered out).</p>
     </div>
   </div>
 </main>
