@@ -1,24 +1,26 @@
 FROM python:3.11-slim
 
-# Install system deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc libffi-dev && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Install Python deps
 RUN pip install --no-cache-dir fastapi uvicorn[standard] requests pycryptodome jinja2
 
-# ==== decrypt.py (from the repo) ====
+# ==== decrypt.py ====
 RUN cat <<'PYEOF' > /app/decrypt.py
 import json
 import gzip
 import base64
 import time
+import logging
 from typing import Any, Dict
 from urllib.parse import urlparse
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 _KEY_TABLE = {
     "55": "170b070da9654622",
@@ -73,20 +75,24 @@ def fetch_and_decrypt(url: str, params: dict = None, timeout: int = 30) -> Dict[
     user = resp.headers.get("user")
     v = resp.headers.get("v")
     if not user or not v:
-        raise ValueError("Missing user/v headers")
+        logger.warning(f"Missing user/v headers at {url}. Headers: {dict(resp.headers)}")
+        raise ValueError(f"Missing user/v headers at {url}")
     return decrypt(resp.text, user, v, url)
 PYEOF
 
-# ==== FastAPI backend ====
+# ==== main.py ====
 RUN cat <<'PYEOF' > /app/main.py
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import json
 from decrypt import fetch_and_decrypt
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="CoinGlass Decrypt Dashboard")
 executor = ThreadPoolExecutor(max_workers=4)
@@ -97,6 +103,18 @@ templates = Jinja2Templates(directory="/app/templates")
 async def index(request: Request):
     return templates.TemplateResponse(request, "index.html", {})
 
+def extract_data(raw):
+    """Flexible data extraction - handles .list, .data, and root array"""
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, dict):
+        if "list" in raw:
+            return raw["list"]
+        if "data" in raw:
+            d = raw["data"]
+            return d if isinstance(d, list) else [d]
+    return raw if isinstance(raw, list) else []
+
 @app.get("/api/rsi")
 async def get_rsi():
     try:
@@ -104,8 +122,9 @@ async def get_rsi():
         data = await loop.run_in_executor(executor, fetch_and_decrypt,
             "https://capi.coinglass.com/api/spot/rsi/list",
             {"pageSize": 500, "pageNum": 1})
-        return {"success": True, "data": data}
+        return {"success": True, "data": data, "extracted": extract_data(data)}
     except Exception as e:
+        logger.error(f"RSI error: {e}")
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
 @app.get("/api/funding")
@@ -115,8 +134,9 @@ async def get_funding():
         data = await loop.run_in_executor(executor, fetch_and_decrypt,
             "https://capi.coinglass.com/api/fundingRate/list",
             {"pageSize": 100, "pageNum": 1})
-        return {"success": True, "data": data}
+        return {"success": True, "data": data, "extracted": extract_data(data)}
     except Exception as e:
+        logger.error(f"Funding error: {e}")
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
 @app.get("/api/liquidation")
@@ -125,8 +145,9 @@ async def get_liquidation():
         loop = asyncio.get_event_loop()
         data = await loop.run_in_executor(executor, fetch_and_decrypt,
             "https://capi.coinglass.com/api/futures/liquidation/today", {})
-        return {"success": True, "data": data}
+        return {"success": True, "data": data, "extracted": extract_data(data)}
     except Exception as e:
+        logger.error(f"Liquidation error: {e}")
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
 @app.get("/api/openinterest")
@@ -135,8 +156,9 @@ async def get_oi():
         loop = asyncio.get_event_loop()
         data = await loop.run_in_executor(executor, fetch_and_decrypt,
             "https://capi.coinglass.com/api/openInterest/statistics", {})
-        return {"success": True, "data": data}
+        return {"success": True, "data": data, "extracted": extract_data(data)}
     except Exception as e:
+        logger.error(f"OI error: {e}")
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
 @app.get("/api/etf")
@@ -145,8 +167,9 @@ async def get_etf():
         loop = asyncio.get_event_loop()
         data = await loop.run_in_executor(executor, fetch_and_decrypt,
             "https://capi.coinglass.com/api/etf/overview", {})
-        return {"success": True, "data": data}
+        return {"success": True, "data": data, "extracted": extract_data(data)}
     except Exception as e:
+        logger.error(f"ETF error: {e}")
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
 @app.get("/api/marketcap")
@@ -156,8 +179,9 @@ async def get_marketcap():
         data = await loop.run_in_executor(executor, fetch_and_decrypt,
             "https://capi.coinglass.com/api/marketCapRank",
             {"pageSize": 100})
-        return {"success": True, "data": data}
+        return {"success": True, "data": data, "extracted": extract_data(data)}
     except Exception as e:
+        logger.error(f"Marketcap error: {e}")
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
 @app.get("/api/futures-stats")
@@ -166,8 +190,9 @@ async def get_futures_stats():
         loop = asyncio.get_event_loop()
         data = await loop.run_in_executor(executor, fetch_and_decrypt,
             "https://capi.coinglass.com/api/futures/home/statistics", {})
-        return {"success": True, "data": data}
+        return {"success": True, "data": data, "extracted": extract_data(data)}
     except Exception as e:
+        logger.error(f"Futures stats error: {e}")
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
 if __name__ == "__main__":
@@ -175,564 +200,443 @@ if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=10000)
 PYEOF
 
-# ==== Create directories ====
 RUN mkdir -p /app/templates
 
-# ==== Beautiful Frontend HTML ====
+# ==== index.html ====
 RUN cat <<'HTMLEOF' > /app/templates/index.html
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CoinGlass Decrypt Dashboard</title>
+<title>CoinGlass Analytics</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-  :root {
-    --bg-primary: #0a0e1a;
-    --bg-secondary: #111827;
-    --bg-card: #1a1f2e;
-    --bg-card-hover: #232a3b;
-    --border: #2d3748;
-    --accent: #00d4aa;
-    --accent-dim: #00d4aa33;
-    --accent-glow: #00d4aa66;
-    --text-primary: #f0f4f8;
-    --text-secondary: #94a3b8;
-    --text-muted: #64748b;
-    --danger: #ef4444;
-    --danger-dim: #ef444433;
-    --warning: #f59e0b;
-    --warning-dim: #f59e0b33;
-    --success: #22c55e;
-    --success-dim: #22c55e33;
-  }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    font-family: 'Inter', sans-serif;
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    min-height: 100vh;
-    overflow-x: hidden;
-  }
-  .mono { font-family: 'JetBrains Mono', monospace; }
-
-  /* Animated background grid */
-  .bg-grid {
-    position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
-    background-image:
-      linear-gradient(rgba(0,212,170,0.03) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(0,212,170,0.03) 1px, transparent 1px);
-    background-size: 50px 50px;
-    pointer-events: none;
-    z-index: 0;
-  }
-  .bg-glow {
-    position: fixed;
-    width: 600px; height: 600px;
-    border-radius: 50%;
-    background: radial-gradient(circle, rgba(0,212,170,0.08) 0%, transparent 70%);
-    top: -200px; left: -200px;
-    pointer-events: none;
-    z-index: 0;
-    animation: float 20s ease-in-out infinite;
-  }
-  .bg-glow-2 {
-    position: fixed;
-    width: 500px; height: 500px;
-    border-radius: 50%;
-    background: radial-gradient(circle, rgba(99,102,241,0.06) 0%, transparent 70%);
-    bottom: -150px; right: -150px;
-    pointer-events: none;
-    z-index: 0;
-    animation: float 25s ease-in-out infinite reverse;
-  }
-  @keyframes float {
-    0%, 100% { transform: translate(0, 0); }
-    50% { transform: translate(30px, 30px); }
-  }
-
-  /* Glassmorphism cards */
-  .glass-card {
-    background: rgba(26, 31, 46, 0.7);
-    backdrop-filter: blur(20px);
-    border: 1px solid rgba(45, 55, 72, 0.6);
-    border-radius: 16px;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-  .glass-card:hover {
-    border-color: rgba(0, 212, 170, 0.3);
-    box-shadow: 0 0 30px rgba(0, 212, 170, 0.08), 0 8px 32px rgba(0,0,0,0.3);
-    transform: translateY(-2px);
-  }
-
-  /* Scrollbar */
-  ::-webkit-scrollbar { width: 6px; height: 6px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: #2d3748; border-radius: 3px; }
-  ::-webkit-scrollbar-thumb:hover { background: #4a5568; }
-
-  /* Animations */
-  @keyframes fadeInUp {
-    from { opacity: 0; transform: translateY(20px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-  .animate-in {
-    animation: fadeInUp 0.6s ease-out forwards;
-  }
-  .delay-1 { animation-delay: 0.1s; }
-  .delay-2 { animation-delay: 0.2s; }
-  .delay-3 { animation-delay: 0.3s; }
-  .delay-4 { animation-delay: 0.4s; }
-
-  /* Loading shimmer */
-  @keyframes shimmer {
-    0% { background-position: -200% 0; }
-    100% { background-position: 200% 0; }
-  }
-  .shimmer {
-    background: linear-gradient(90deg, #1a1f2e 25%, #232a3b 50%, #1a1f2e 75%);
-    background-size: 200% 100%;
-    animation: shimmer 1.5s infinite;
-  }
-
-  /* Tab active state */
-  .tab-active {
-    background: rgba(0, 212, 170, 0.15);
-    color: var(--accent);
-    border: 1px solid rgba(0, 212, 170, 0.3);
-  }
-
-  /* Table row hover */
-  .table-row {
-    transition: background 0.2s;
-    border-bottom: 1px solid rgba(45, 55, 72, 0.4);
-  }
-  .table-row:hover {
-    background: rgba(0, 212, 170, 0.04);
-  }
-
-  /* Status dot pulse */
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
-  }
-  .pulse-dot {
-    animation: pulse 2s ease-in-out infinite;
-  }
-
-  /* Number counter animation */
-  .count-up {
-    transition: all 0.5s ease-out;
-  }
-
-  /* Gradient text */
-  .gradient-text {
-    background: linear-gradient(135deg, #00d4aa 0%, #6366f1 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-  }
-
-  /* Tooltip */
-  .tooltip {
-    position: relative;
-  }
-  .tooltip::after {
-    content: attr(data-tip);
-    position: absolute;
-    bottom: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    padding: 4px 8px;
-    background: #1a1f2e;
-    border: 1px solid #2d3748;
-    border-radius: 6px;
-    font-size: 11px;
-    white-space: nowrap;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.2s;
-    z-index: 100;
-  }
-  .tooltip:hover::after { opacity: 1; }
-
-  /* Responsive */
-  @media (max-width: 768px) {
-    .hide-mobile { display: none; }
-  }
+:root {
+  --bg: #070a12; --bg-elevated: #0d111f; --bg-card: #131829; --bg-card-hover: #1a2035;
+  --border: #1e2740; --border-hover: #2a3560; --accent: #00e5c0; --accent-dim: rgba(0,229,192,0.08);
+  --text: #e8ecf4; --text-secondary: #8b95a8; --text-muted: #4a5568;
+  --danger: #ff4757; --danger-bg: rgba(255,71,87,0.08);
+  --success: #2ed573; --success-bg: rgba(46,213,115,0.08);
+  --warning: #ffa502; --warning-bg: rgba(255,165,2,0.08);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; overflow-x: hidden; -webkit-font-smoothing: antialiased; }
+.mono { font-family: 'JetBrains Mono', monospace; }
+.mesh-bg { position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background: radial-gradient(ellipse 80% 50% at 20% 40%, rgba(0,229,192,0.04) 0%, transparent 50%), radial-gradient(ellipse 60% 40% at 80% 80%, rgba(55,66,250,0.03) 0%, transparent 50%); }
+.grid-overlay { position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background-image: linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px); background-size: 60px 60px;
+  mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, black 20%, transparent 70%); }
+@keyframes slideUp { from { opacity: 0; transform: translateY(30px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes countUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes pulse-ring { 0% { transform: scale(0.8); opacity: 1; } 100% { transform: scale(2.2); opacity: 0; } }
+@keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+.enter { animation: slideUp 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards; opacity: 0; }
+.enter-d1 { animation-delay: 0.08s; } .enter-d2 { animation-delay: 0.16s; } .enter-d3 { animation-delay: 0.24s; }
+.enter-d4 { animation-delay: 0.32s; } .enter-d5 { animation-delay: 0.40s; } .enter-d6 { animation-delay: 0.48s; }
+.skeleton { background: linear-gradient(90deg, var(--bg-card) 25%, #1a2035 50%, var(--bg-card) 75%); background-size: 200% 100%; animation: shimmer 1.8s infinite; border-radius: 8px; }
+.card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1); position: relative; overflow: hidden; }
+.card::before { content: ''; position: absolute; inset: 0; border-radius: 16px; padding: 1px; background: linear-gradient(135deg, rgba(0,229,192,0.1), transparent 40%); -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0); -webkit-mask-composite: xor; mask-composite: exclude; opacity: 0; transition: opacity 0.35s; pointer-events: none; }
+.card:hover::before { opacity: 1; }
+.card:hover { border-color: var(--border-hover); transform: translateY(-3px); box-shadow: 0 20px 40px rgba(0,0,0,0.4), 0 0 0 1px rgba(0,229,192,0.06); }
+.status-live { position: relative; width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
+.status-live::after { content: ''; position: absolute; inset: -4px; border-radius: 50%; border: 1px solid var(--success); animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+.tab { position: relative; padding: 10px 18px; border-radius: 12px; font-size: 13px; font-weight: 500; color: var(--text-secondary); background: transparent; border: 1px solid transparent; cursor: pointer; transition: all 0.25s; white-space: nowrap; display: flex; align-items: center; gap: 8px; }
+.tab:hover { color: var(--text); background: rgba(255,255,255,0.03); }
+.tab.active { color: var(--accent); background: var(--accent-dim); border-color: rgba(0,229,192,0.15); }
+.tab .tab-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0.5; }
+.tab.active .tab-dot { opacity: 1; box-shadow: 0 0 8px currentColor; }
+.panel { opacity: 0; transform: translateY(12px); transition: opacity 0.4s ease, transform 0.4s ease; display: none; }
+.panel.active { display: block; opacity: 1; transform: translateY(0); }
+.data-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+.data-table th { padding: 14px 16px; text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); border-bottom: 1px solid var(--border); }
+.data-table td { padding: 12px 16px; font-size: 13px; border-bottom: 1px solid rgba(30,39,64,0.5); transition: background 0.15s; }
+.data-table tbody tr:hover td { background: rgba(0,229,192,0.02); }
+.data-table tbody tr:last-child td { border-bottom: none; }
+.badge { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; font-family: 'JetBrains Mono', monospace; }
+.badge-red { background: var(--danger-bg); color: var(--danger); }
+.badge-green { background: var(--success-bg); color: var(--success); }
+.badge-amber { background: var(--warning-bg); color: var(--warning); }
+.badge-neutral { background: rgba(255,255,255,0.05); color: var(--text-secondary); }
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: #2a3560; }
+.chart-wrap { position: relative; height: 280px; }
+.mini-chart-wrap { position: relative; height: 180px; }
+.section-title { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; display: flex; align-items: center; gap: 10px; }
+.section-title::before { content: ''; width: 4px; height: 18px; border-radius: 2px; background: linear-gradient(180deg, var(--accent), transparent); }
+.search-input { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 10px; padding: 8px 14px; font-size: 13px; color: var(--text); outline: none; transition: all 0.2s; width: 220px; }
+.search-input:focus { border-color: rgba(0,229,192,0.3); box-shadow: 0 0 0 3px rgba(0,229,192,0.05); }
+.search-input::placeholder { color: var(--text-muted); }
+.error-state { padding: 40px; text-align: center; color: var(--danger); }
+.error-state svg { width: 48px; height: 48px; margin: 0 auto 16px; opacity: 0.5; }
+.num-anim { display: inline-block; animation: countUp 0.5s ease-out; }
+.api-ref { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.api-ref-header { padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); display: flex; align-items: center; gap: 8px; cursor: pointer; transition: background 0.2s; }
+.api-ref-header:hover { background: rgba(255,255,255,0.02); }
+.api-ref-content { max-height: 0; overflow: hidden; transition: max-height 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+.api-ref-content.open { max-height: 800px; }
+.api-endpoint { padding: 10px 16px; border-bottom: 1px solid rgba(30,39,64,0.5); font-size: 12px; display: flex; align-items: center; gap: 12px; }
+.api-endpoint:last-child { border-bottom: none; }
+.api-method { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 4px; background: rgba(0,229,192,0.1); color: var(--accent); flex-shrink: 0; }
+.api-path { font-family: 'JetBrains Mono', monospace; color: var(--text); font-size: 12px; }
+.api-desc { color: var(--text-muted); margin-left: auto; font-size: 11px; }
+@media (max-width: 768px) { .hide-mobile { display: none; } .search-input { width: 140px; } }
 </style>
 </head>
 <body>
-<div class="bg-grid"></div>
-<div class="bg-glow"></div>
-<div class="bg-glow-2"></div>
+<div class="mesh-bg"></div>
+<div class="grid-overlay"></div>
 
 <div class="relative z-10 min-h-screen">
-  <header class="border-b border-[#2d3748]/60 backdrop-blur-xl sticky top-0 z-50" style="background: rgba(10,14,26,0.8);">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
-      <div class="flex items-center gap-3">
-        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-[#00d4aa] to-[#6366f1] flex items-center justify-center shadow-lg shadow-[#00d4aa]/20">
-          <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+  <header class="sticky top-0 z-50 border-b border-[#1e2740]/80" style="background: rgba(7,10,18,0.85); backdrop-filter: blur(20px);">
+    <div class="max-w-7xl mx-auto px-5 py-4 flex items-center justify-between">
+      <div class="flex items-center gap-3.5">
+        <div class="w-10 h-10 rounded-xl flex items-center justify-center" style="background: linear-gradient(135deg, #00e5c0, #3742fa); box-shadow: 0 4px 20px rgba(0,229,192,0.2);">
+          <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
         </div>
         <div>
-          <h1 class="text-xl font-bold tracking-tight">CoinGlass<span class="gradient-text">Decrypt</span></h1>
-          <p class="text-xs text-[#64748b] mono">AES-128-ECB · 280+ Endpoints</p>
+          <h1 class="text-lg font-bold tracking-tight" style="letter-spacing: -0.02em;">CoinGlass<span style="background: linear-gradient(135deg, #00e5c0, #3742fa); -webkit-background-clip: text; -webkit-text-fill-color: transparent;"> Analytics</span></h1>
+          <p class="text-[11px] text-[#4a5568] mono mt-0.5">Real-time Decrypted Market Intelligence</p>
         </div>
       </div>
-      <div class="flex items-center gap-3">
-        <div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#00d4aa]/10 border border-[#00d4aa]/20">
-          <span class="w-2 h-2 rounded-full bg-[#00d4aa] pulse-dot"></span>
-          <span class="text-xs text-[#00d4aa] font-medium mono">LIVE</span>
+      <div class="flex items-center gap-4">
+        <div class="flex items-center gap-2.5 px-3.5 py-1.5 rounded-full" style="background: rgba(46,213,115,0.08); border: 1px solid rgba(46,213,115,0.15);">
+          <span class="status-live"></span>
+          <span class="text-[11px] font-semibold mono" style="color: var(--success);">LIVE</span>
         </div>
-        <div class="text-xs text-[#64748b] mono" id="lastUpdate">--:--:--</div>
+        <div class="text-[11px] text-[#4a5568] mono" id="lastUpdate">--:--:--</div>
       </div>
     </div>
   </header>
 
-  <main class="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+  <main class="max-w-7xl mx-auto px-5 py-6">
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-      <div class="glass-card p-4 animate-in">
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-xs text-[#64748b] uppercase tracking-wider font-medium">Total Coins</span>
-          <div class="w-8 h-8 rounded-lg bg-[#00d4aa]/10 flex items-center justify-center">
-            <svg class="w-4 h-4 text-[#00d4aa]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3"/></svg>
-          </div>
+      <div class="card p-5 enter">
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-[11px] font-semibold uppercase tracking-wider text-[#4a5568]">Tracked Assets</span>
+          <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: rgba(0,229,192,0.08);"><svg class="w-4 h-4" style="color: var(--accent);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3"/></svg></div>
         </div>
-        <div class="text-2xl font-bold mono" id="statTotalCoins">--</div>
-        <div class="text-xs text-[#64748b] mt-1">Tracked by RSI</div>
+        <div class="text-2xl font-bold mono num-anim" id="statTotal">--</div>
+        <div class="text-[11px] text-[#4a5568] mt-1.5">Across all exchanges</div>
       </div>
-      <div class="glass-card p-4 animate-in delay-1">
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-xs text-[#64748b] uppercase tracking-wider font-medium">Overbought</span>
-          <div class="w-8 h-8 rounded-lg bg-[#ef4444]/10 flex items-center justify-center">
-            <svg class="w-4 h-4 text-[#ef4444]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
-          </div>
+      <div class="card p-5 enter enter-d1">
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-[11px] font-semibold uppercase tracking-wider text-[#4a5568]">Overbought</span>
+          <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: var(--danger-bg);"><svg class="w-4 h-4" style="color: var(--danger);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg></div>
         </div>
-        <div class="text-2xl font-bold mono text-[#ef4444]" id="statOverbought">--</div>
-        <div class="text-xs text-[#64748b] mt-1">RSI 4h ≥ 70</div>
+        <div class="text-2xl font-bold mono num-anim" style="color: var(--danger);" id="statOverbought">--</div>
+        <div class="text-[11px] text-[#4a5568] mt-1.5">RSI 4h >= 70</div>
       </div>
-      <div class="glass-card p-4 animate-in delay-2">
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-xs text-[#64748b] uppercase tracking-wider font-medium">Oversold</span>
-          <div class="w-8 h-8 rounded-lg bg-[#22c55e]/10 flex items-center justify-center">
-            <svg class="w-4 h-4 text-[#22c55e]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6"/></svg>
-          </div>
+      <div class="card p-5 enter enter-d2">
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-[11px] font-semibold uppercase tracking-wider text-[#4a5568]">Oversold</span>
+          <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: var(--success-bg);"><svg class="w-4 h-4" style="color: var(--success);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6"/></svg></div>
         </div>
-        <div class="text-2xl font-bold mono text-[#22c55e]" id="statOversold">--</div>
-        <div class="text-xs text-[#64748b] mt-1">RSI 4h ≤ 30</div>
+        <div class="text-2xl font-bold mono num-anim" style="color: var(--success);" id="statOversold">--</div>
+        <div class="text-[11px] text-[#4a5568] mt-1.5">RSI 4h <= 30</div>
       </div>
-      <div class="glass-card p-4 animate-in delay-3">
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-xs text-[#64748b] uppercase tracking-wider font-medium">Neutral</span>
-          <div class="w-8 h-8 rounded-lg bg-[#f59e0b]/10 flex items-center justify-center">
-            <svg class="w-4 h-4 text-[#f59e0b]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"/></svg>
-          </div>
+      <div class="card p-5 enter enter-d3">
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-[11px] font-semibold uppercase tracking-wider text-[#4a5568]">Neutral Zone</span>
+          <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: var(--warning-bg);"><svg class="w-4 h-4" style="color: var(--warning);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"/></svg></div>
         </div>
-        <div class="text-2xl font-bold mono text-[#f59e0b]" id="statNeutral">--</div>
-        <div class="text-xs text-[#64748b] mt-1">30 < RSI < 70</div>
+        <div class="text-2xl font-bold mono num-anim" style="color: var(--warning);" id="statNeutral">--</div>
+        <div class="text-[11px] text-[#4a5568] mt-1.5">30 < RSI < 70</div>
       </div>
     </div>
 
-    <div class="flex gap-2 mb-6 overflow-x-auto pb-2">
-      <button onclick="switchTab('rsi')" id="tab-rsi" class="tab-active px-4 py-2 rounded-xl text-sm font-medium transition-all whitespace-nowrap">RSI Dashboard</button>
-      <button onclick="switchTab('funding')" id="tab-funding" class="px-4 py-2 rounded-xl text-sm font-medium text-[#94a3b8] hover:text-white hover:bg-[#232a3b] transition-all whitespace-nowrap">Funding Rates</button>
-      <button onclick="switchTab('liquidation')" id="tab-liquidation" class="px-4 py-2 rounded-xl text-sm font-medium text-[#94a3b8] hover:text-white hover:bg-[#232a3b] transition-all whitespace-nowrap">Liquidations</button>
-      <button onclick="switchTab('marketcap')" id="tab-marketcap" class="px-4 py-2 rounded-xl text-sm font-medium text-[#94a3b8] hover:text-white hover:bg-[#232a3b] transition-all whitespace-nowrap">Market Cap</button>
-      <button onclick="switchTab('futures')" id="tab-futures" class="px-4 py-2 rounded-xl text-sm font-medium text-[#94a3b8] hover:text-white hover:bg-[#232a3b] transition-all whitespace-nowrap">Futures Stats</button>
-      <button onclick="switchTab('etf')" id="tab-etf" class="px-4 py-2 rounded-xl text-sm font-medium text-[#94a3b8] hover:text-white hover:bg-[#232a3b] transition-all whitespace-nowrap">ETF Flows</button>
+    <div class="flex gap-2 mb-6 overflow-x-auto pb-1 enter enter-d4" style="scrollbar-width: none;">
+      <button onclick="switchTab('rsi')" id="tab-rsi" class="tab active"><span class="tab-dot"></span>RSI Dashboard</button>
+      <button onclick="switchTab('funding')" id="tab-funding" class="tab"><span class="tab-dot"></span>Funding Rates</button>
+      <button onclick="switchTab('liquidation')" id="tab-liquidation" class="tab"><span class="tab-dot"></span>Liquidations</button>
+      <button onclick="switchTab('openinterest')" id="tab-openinterest" class="tab"><span class="tab-dot"></span>Open Interest</button>
+      <button onclick="switchTab('marketcap')" id="tab-marketcap" class="tab"><span class="tab-dot"></span>Market Cap</button>
+      <button onclick="switchTab('futures')" id="tab-futures" class="tab"><span class="tab-dot"></span>Futures</button>
+      <button onclick="switchTab('etf')" id="tab-etf" class="tab"><span class="tab-dot"></span>ETF Flows</button>
     </div>
 
-    <div id="panel-rsi" class="tab-panel">
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div class="lg:col-span-2 glass-card p-6">
+    <div id="panel-rsi" class="panel active">
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-5">
+        <div class="card p-5 lg:col-span-2 enter enter-d4">
           <div class="flex items-center justify-between mb-4">
-            <h2 class="text-lg font-semibold">RSI 4h Distribution</h2>
+            <h2 class="section-title">RSI 4h Distribution</h2>
             <div class="flex gap-2">
-              <button onclick="sortRsi('rsi4h')" class="text-xs px-3 py-1 rounded-lg bg-[#232a3b] hover:bg-[#2d3748] transition">Sort 4h</button>
-              <button onclick="sortRsi('rsi1h')" class="text-xs px-3 py-1 rounded-lg bg-[#232a3b] hover:bg-[#2d3748] transition">Sort 1h</button>
-              <button onclick="sortRsi('rsi15m')" class="text-xs px-3 py-1 rounded-lg bg-[#232a3b] hover:bg-[#2d3748] transition">Sort 15m</button>
+              <button onclick="sortRsi('rsi4h')" class="text-[11px] px-3 py-1.5 rounded-lg font-medium transition hover:bg-[#1a2035]" style="background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-secondary);">Sort 4h</button>
+              <button onclick="sortRsi('rsi1h')" class="text-[11px] px-3 py-1.5 rounded-lg font-medium transition hover:bg-[#1a2035]" style="background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-secondary);">Sort 1h</button>
             </div>
           </div>
-          <div class="h-64">
-            <canvas id="rsiChart"></canvas>
-          </div>
+          <div class="chart-wrap"><canvas id="rsiChart"></canvas></div>
         </div>
-
-        <div class="glass-card p-6">
-          <h2 class="text-lg font-semibold mb-4">Extreme RSI</h2>
-          <div class="space-y-3" id="extremeRsi">
-            <div class="shimmer h-12 rounded-lg"></div>
-            <div class="shimmer h-12 rounded-lg"></div>
-            <div class="shimmer h-12 rounded-lg"></div>
+        <div class="card p-5 enter enter-d5">
+          <h2 class="section-title mb-4">Extreme Signals</h2>
+          <div id="extremeRsi" class="space-y-3">
+            <div class="skeleton h-14"></div><div class="skeleton h-14"></div><div class="skeleton h-14"></div>
           </div>
         </div>
       </div>
-
-      <div class="glass-card mt-6 overflow-hidden">
-        <div class="p-4 border-b border-[#2d3748]/60 flex items-center justify-between">
-          <h2 class="text-lg font-semibold">All Coins RSI</h2>
+      <div class="card overflow-hidden enter enter-d5">
+        <div class="p-4 border-b flex items-center justify-between" style="border-color: var(--border);">
+          <h2 class="section-title">All Coins</h2>
           <div class="flex items-center gap-3">
-            <input type="text" id="rsiSearch" placeholder="Search coin..." 
-              class="bg-[#111827] border border-[#2d3748] rounded-lg px-3 py-1.5 text-sm text-white placeholder-[#64748b] focus:outline-none focus:border-[#00d4aa] transition w-48"
-              oninput="filterRsiTable()">
-            <span class="text-xs text-[#64748b]" id="rsiCount">0 coins</span>
+            <input type="text" id="rsiSearch" placeholder="Search symbol..." class="search-input" oninput="filterRsiTable()">
+            <span class="text-[11px] text-[#4a5568] mono" id="rsiCount">0 assets</span>
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm">
-            <thead>
-              <tr class="text-[#64748b] text-xs uppercase tracking-wider border-b border-[#2d3748]/60">
-                <th class="px-4 py-3 text-left font-medium">#</th>
-                <th class="px-4 py-3 text-left font-medium">Coin</th>
-                <th class="px-4 py-3 text-right font-medium">Price</th>
-                <th class="px-4 py-3 text-right font-medium">RSI 15m</th>
-                <th class="px-4 py-3 text-right font-medium">RSI 1h</th>
-                <th class="px-4 py-3 text-right font-medium">RSI 4h</th>
-                <th class="px-4 py-3 text-right font-medium">RSI 24h</th>
-                <th class="px-4 py-3 text-right font-medium hide-mobile">Change 24h</th>
-              </tr>
-            </thead>
-            <tbody id="rsiTableBody"></tbody>
+          <table class="data-table">
+            <thead><tr><th>#</th><th>Asset</th><th class="text-right">Price</th><th class="text-right">RSI 15m</th><th class="text-right">RSI 1h</th><th class="text-right">RSI 4h</th><th class="text-right">RSI 24h</th><th class="text-right hide-mobile">24h Change</th></tr></thead>
+            <tbody id="rsiTableBody"><tr><td colspan="8" class="p-8 text-center text-[#4a5568]"><div class="skeleton h-8 mx-auto max-w-md"></div></td></tr></tbody>
           </table>
         </div>
       </div>
     </div>
 
-    <div id="panel-funding" class="tab-panel hidden">
-      <div class="glass-card overflow-hidden">
-        <div class="p-4 border-b border-[#2d3748]/60">
-          <h2 class="text-lg font-semibold">Funding Rates</h2>
+    <div id="panel-funding" class="panel">
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-5">
+        <div class="card p-5 lg:col-span-2">
+          <h2 class="section-title mb-4">Funding Rate Distribution</h2>
+          <div class="chart-wrap"><canvas id="fundingChart"></canvas></div>
+        </div>
+        <div class="card p-5">
+          <h2 class="section-title mb-4">Highest Rates</h2>
+          <div id="fundingTop" class="space-y-2.5"><div class="skeleton h-10"></div><div class="skeleton h-10"></div><div class="skeleton h-10"></div></div>
+        </div>
+      </div>
+      <div class="card overflow-hidden">
+        <div class="p-4 border-b flex items-center justify-between" style="border-color: var(--border);">
+          <h2 class="section-title">All Funding Rates</h2>
+          <span class="text-[11px] text-[#4a5568] mono" id="fundingCount">0 rates</span>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm">
-            <thead>
-              <tr class="text-[#64748b] text-xs uppercase tracking-wider border-b border-[#2d3748]/60">
-                <th class="px-4 py-3 text-left font-medium">Exchange</th>
-                <th class="px-4 py-3 text-left font-medium">Coin</th>
-                <th class="px-4 py-3 text-right font-medium">Rate</th>
-                <th class="px-4 py-3 text-right font-medium">Annualized</th>
-              </tr>
-            </thead>
-            <tbody id="fundingTableBody"></tbody>
+          <table class="data-table">
+            <thead><tr><th>Exchange</th><th>Asset</th><th class="text-right">Rate</th><th class="text-right">Annualized</th><th class="text-right hide-mobile">Timestamp</th></tr></thead>
+            <tbody id="fundingTableBody"><tr><td colspan="5" class="p-8 text-center text-[#4a5568]"><div class="skeleton h-8 mx-auto max-w-md"></div></td></tr></tbody>
           </table>
         </div>
       </div>
     </div>
 
-    <div id="panel-liquidation" class="tab-panel hidden">
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div class="glass-card p-6">
-          <h2 class="text-lg font-semibold mb-4">Today's Liquidations</h2>
-          <div id="liquidationContent"></div>
+    <div id="panel-liquidation" class="panel">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
+        <div class="card p-5">
+          <h2 class="section-title mb-4">Liquidation Distribution</h2>
+          <div class="mini-chart-wrap"><canvas id="liqChart"></canvas></div>
         </div>
-        <div class="glass-card p-6">
-          <h2 class="text-lg font-semibold mb-4">Liquidation Chart</h2>
-          <div class="h-64">
-            <canvas id="liqChart"></canvas>
+        <div class="card p-5">
+          <h2 class="section-title mb-4">Long vs Short</h2>
+          <div class="mini-chart-wrap"><canvas id="liqLongShortChart"></canvas></div>
+        </div>
+      </div>
+      <div class="card p-5">
+        <h2 class="section-title mb-4">Liquidation Details</h2>
+        <div id="liquidationContent" class="overflow-auto max-h-96"><div class="skeleton h-32"></div></div>
+      </div>
+    </div>
+
+    <div id="panel-openinterest" class="panel">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
+        <div class="card p-5">
+          <h2 class="section-title mb-4">OI by Exchange</h2>
+          <div class="chart-wrap"><canvas id="oiChart"></canvas></div>
+        </div>
+        <div class="card p-5">
+          <h2 class="section-title mb-4">OI Change 24h</h2>
+          <div class="chart-wrap"><canvas id="oiChangeChart"></canvas></div>
+        </div>
+      </div>
+      <div class="card overflow-hidden">
+        <div class="p-4 border-b" style="border-color: var(--border);"><h2 class="section-title">Open Interest Statistics</h2></div>
+        <div id="oiContent" class="p-5 overflow-auto max-h-96"><div class="skeleton h-32"></div></div>
+      </div>
+    </div>
+
+    <div id="panel-marketcap" class="panel">
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-5">
+        <div class="card p-5 lg:col-span-2">
+          <h2 class="section-title mb-4">Market Cap vs Volume</h2>
+          <div class="chart-wrap"><canvas id="mcChart"></canvas></div>
+        </div>
+        <div class="card p-5">
+          <h2 class="section-title mb-4">Top Gainers</h2>
+          <div id="mcGainers" class="space-y-2.5"><div class="skeleton h-10"></div><div class="skeleton h-10"></div><div class="skeleton h-10"></div></div>
+        </div>
+      </div>
+      <div class="card overflow-hidden">
+        <div class="p-4 border-b flex items-center justify-between" style="border-color: var(--border);">
+          <h2 class="section-title">Market Cap Rankings</h2>
+          <span class="text-[11px] text-[#4a5568] mono" id="mcCount">0 assets</span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="data-table">
+            <thead><tr><th>#</th><th>Asset</th><th class="text-right">Price</th><th class="text-right">Market Cap</th><th class="text-right">24h Change</th><th class="text-right hide-mobile">Volume</th></tr></thead>
+            <tbody id="mcTableBody"><tr><td colspan="6" class="p-8 text-center text-[#4a5568]"><div class="skeleton h-8 mx-auto max-w-md"></div></td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div id="panel-futures" class="panel">
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-5" id="futuresStatsGrid">
+        <div class="card p-5"><div class="skeleton h-16"></div></div>
+        <div class="card p-5"><div class="skeleton h-16"></div></div>
+        <div class="card p-5"><div class="skeleton h-16"></div></div>
+        <div class="card p-5"><div class="skeleton h-16"></div></div>
+      </div>
+      <div class="card p-5">
+        <h2 class="section-title mb-4">Futures Overview</h2>
+        <div id="futuresContent" class="overflow-auto max-h-96"><div class="skeleton h-32"></div></div>
+      </div>
+    </div>
+
+    <div id="panel-etf" class="panel">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
+        <div class="card p-5">
+          <h2 class="section-title mb-4">ETF Flow Distribution</h2>
+          <div class="chart-wrap"><canvas id="etfChart"></canvas></div>
+        </div>
+        <div class="card p-5">
+          <h2 class="section-title mb-4">Daily Flow Trend</h2>
+          <div class="chart-wrap"><canvas id="etfTrendChart"></canvas></div>
+        </div>
+      </div>
+      <div class="card p-5">
+        <h2 class="section-title mb-4">ETF Details</h2>
+        <div id="etfContent" class="overflow-auto max-h-96"><div class="skeleton h-32"></div></div>
+      </div>
+    </div>
+
+    <div class="mt-8 enter enter-d6">
+      <div class="api-ref">
+        <div class="api-ref-header" onclick="this.nextElementSibling.classList.toggle('open'); this.querySelector('svg').style.transform = this.nextElementSibling.classList.contains('open') ? 'rotate(180deg)' : 'rotate(0deg)';">
+          <svg class="w-4 h-4 transition-transform duration-300" style="color: var(--accent);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          <span>API Reference</span>
+          <span style="margin-left: auto; color: var(--text-muted); font-size: 11px; font-weight: 400;">Click to expand</span>
+        </div>
+        <div class="api-ref-content">
+          <div class="api-endpoint"><span class="api-method">GET</span><span class="api-path">/api/rsi</span><span class="api-desc">RSI indicators for 500+ assets</span></div>
+          <div class="api-endpoint"><span class="api-method">GET</span><span class="api-path">/api/funding</span><span class="api-desc">Perpetual funding rates by exchange</span></div>
+          <div class="api-endpoint"><span class="api-method">GET</span><span class="api-path">/api/liquidation</span><span class="api-desc">24h liquidation volumes</span></div>
+          <div class="api-endpoint"><span class="api-method">GET</span><span class="api-path">/api/openinterest</span><span class="api-desc">Open interest statistics</span></div>
+          <div class="api-endpoint"><span class="api-method">GET</span><span class="api-path">/api/marketcap</span><span class="api-desc">Market cap rankings (top 100)</span></div>
+          <div class="api-endpoint"><span class="api-method">GET</span><span class="api-path">/api/futures-stats</span><span class="api-desc">Aggregate futures statistics</span></div>
+          <div class="api-endpoint"><span class="api-method">GET</span><span class="api-path">/api/etf</span><span class="api-desc">Spot Bitcoin ETF flow data</span></div>
+          <div style="padding: 12px 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-muted);">
+            All endpoints return <code style="background: var(--bg-card); padding: 2px 6px; border-radius: 4px; color: var(--accent);">{ "success": true, "data": {...}, "extracted": [...] }</code>. Data is decrypted in real-time from CoinGlass.
           </div>
         </div>
-      </div>
-    </div>
-
-    <div id="panel-marketcap" class="tab-panel hidden">
-      <div class="glass-card overflow-hidden">
-        <div class="p-4 border-b border-[#2d3748]/60">
-          <h2 class="text-lg font-semibold">Market Cap Rankings</h2>
-        </div>
-        <div class="overflow-x-auto">
-          <table class="w-full text-sm">
-            <thead>
-              <tr class="text-[#64748b] text-xs uppercase tracking-wider border-b border-[#2d3748]/60">
-                <th class="px-4 py-3 text-left font-medium">#</th>
-                <th class="px-4 py-3 text-left font-medium">Coin</th>
-                <th class="px-4 py-3 text-right font-medium">Price</th>
-                <th class="px-4 py-3 text-right font-medium">Market Cap</th>
-                <th class="px-4 py-3 text-right font-medium">24h Change</th>
-                <th class="px-4 py-3 text-right font-medium hide-mobile">Volume</th>
-              </tr>
-            </thead>
-            <tbody id="marketcapTableBody"></tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
-    <div id="panel-futures" class="tab-panel hidden">
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="futuresStatsGrid"></div>
-    </div>
-
-    <div id="panel-etf" class="tab-panel hidden">
-      <div class="glass-card p-6">
-        <h2 class="text-lg font-semibold mb-4">ETF Overview</h2>
-        <div id="etfContent"></div>
       </div>
     </div>
   </main>
 </div>
-
 <script>
-// === Global State ===
+const charts = {};
 let allRsiData = [];
 let currentRsiSort = 'rsi4h';
-let charts = {};
 
-// === Tab Switching ===
+function getDataArray(json) {
+  if (json.extracted && Array.isArray(json.extracted)) return json.extracted;
+  if (json.data && Array.isArray(json.data)) return json.data;
+  if (json.data && json.data.list && Array.isArray(json.data.list)) return json.data.list;
+  if (Array.isArray(json)) return json;
+  return [];
+}
+
+function getDataObj(json) {
+  if (json.data && typeof json.data === 'object' && !Array.isArray(json.data)) return json.data;
+  if (json && typeof json === 'object' && !Array.isArray(json)) return json;
+  return {};
+}
+
 function switchTab(tab) {
-  document.querySelectorAll('.tab-panel').forEach(p => p.classList.add('hidden'));
-  document.getElementById('panel-' + tab).classList.remove('hidden');
-  document.querySelectorAll('[id^="tab-"]').forEach(t => {
-    t.classList.remove('tab-active');
-    t.classList.add('text-[#94a3b8]');
-  });
-  document.getElementById('tab-' + tab).classList.add('tab-active');
-  document.getElementById('tab-' + tab).classList.remove('text-[#94a3b8]');
-
-  if (tab === 'funding' && !window.fundingLoaded) { loadFunding(); window.fundingLoaded = true; }
-  if (tab === 'liquidation' && !window.liqLoaded) { loadLiquidation(); window.liqLoaded = true; }
-  if (tab === 'marketcap' && !window.mcLoaded) { loadMarketcap(); window.mcLoaded = true; }
-  if (tab === 'futures' && !window.futuresLoaded) { loadFutures(); window.futuresLoaded = true; }
-  if (tab === 'etf' && !window.etfLoaded) { loadEtf(); window.etfLoaded = true; }
+  document.querySelectorAll('.panel').forEach(p => { p.classList.remove('active'); setTimeout(() => { if(!p.classList.contains('active')) p.style.display='none'; }, 400); });
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('tab-' + tab).classList.add('active');
+  const panel = document.getElementById('panel-' + tab);
+  panel.style.display = 'block';
+  requestAnimationFrame(() => panel.classList.add('active'));
+  const loaders = { funding: loadFunding, liquidation: loadLiquidation, openinterest: loadOI, marketcap: loadMarketcap, futures: loadFutures, etf: loadEtf };
+  if (loaders[tab] && !window[tab + 'Loaded']) { loaders[tab](); window[tab + 'Loaded'] = true; }
 }
 
-// === RSI Helpers ===
-function getRsiColor(val) {
+function getRsiColor(v) { v = parseFloat(v); if (v >= 70) return '#ff4757'; if (v <= 30) return '#2ed573'; return '#8b95a8'; }
+function getRsiBg(v) { v = parseFloat(v); if (v >= 70) return 'rgba(255,71,87,0.12)'; if (v <= 30) return 'rgba(46,213,115,0.12)'; return 'rgba(255,255,255,0.04)'; }
+function getChangeColor(v) { v = parseFloat(v); if (v > 0) return '#2ed573'; if (v < 0) return '#ff4757'; return '#8b95a8'; }
+function fmtPrice(p) { p = parseFloat(p); if (p >= 1000) return '$' + p.toLocaleString('en', {minimumFractionDigits: 2, maximumFractionDigits: 2}); if (p >= 1) return '$' + p.toFixed(4); return '$' + p.toFixed(6); }
+function fmtNum(n) { n = parseFloat(n); if (n >= 1e12) return (n/1e12).toFixed(2) + 'T'; if (n >= 1e9) return (n/1e9).toFixed(2) + 'B'; if (n >= 1e6) return (n/1e6).toFixed(2) + 'M'; if (n >= 1e3) return (n/1e3).toFixed(2) + 'K'; return n.toFixed(2); }
+function fmtPct(n) { n = parseFloat(n); return (n > 0 ? '+' : '') + n.toFixed(2) + '%'; }
+
+function badge(val, type) {
   const v = parseFloat(val);
-  if (v >= 70) return '#ef4444';
-  if (v <= 30) return '#22c55e';
-  return '#94a3b8';
-}
-function getRsiBg(val) {
-  const v = parseFloat(val);
-  if (v >= 70) return 'rgba(239,68,68,0.15)';
-  if (v <= 30) return 'rgba(34,197,94,0.15)';
-  return 'transparent';
-}
-function getChangeColor(val) {
-  const v = parseFloat(val);
-  if (v > 0) return '#22c55e';
-  if (v < 0) return '#ef4444';
-  return '#94a3b8';
-}
-function formatPrice(p) {
-  const price = parseFloat(p);
-  if (price >= 1000) return '$' + price.toLocaleString('en', {minimumFractionDigits: 2, maximumFractionDigits: 2});
-  if (price >= 1) return '$' + price.toFixed(4);
-  return '$' + price.toFixed(6);
-}
-function formatNumber(n) {
-  const num = parseFloat(n);
-  if (num >= 1e12) return (num/1e12).toFixed(2) + 'T';
-  if (num >= 1e9) return (num/1e9).toFixed(2) + 'B';
-  if (num >= 1e6) return (num/1e6).toFixed(2) + 'M';
-  if (num >= 1e3) return (num/1e3).toFixed(2) + 'K';
-  return num.toFixed(2);
+  if (type === 'rsi') {
+    if (v >= 70) return '<span class="badge badge-red">' + v.toFixed(1) + '</span>';
+    if (v <= 30) return '<span class="badge badge-green">' + v.toFixed(1) + '</span>';
+    return '<span class="badge badge-neutral">' + v.toFixed(1) + '</span>';
+  }
+  if (type === 'change') {
+    if (v > 0) return '<span class="badge badge-green">+' + v.toFixed(2) + '%</span>';
+    if (v < 0) return '<span class="badge badge-red">' + v.toFixed(2) + '%</span>';
+    return '<span class="badge badge-neutral">0.00%</span>';
+  }
+  if (type === 'funding') {
+    if (v > 0) return '<span class="badge badge-red">' + (v*100).toFixed(4) + '%</span>';
+    if (v < 0) return '<span class="badge badge-green">' + (v*100).toFixed(4) + '%</span>';
+    return '<span class="badge badge-neutral">0.0000%</span>';
+  }
 }
 
-// === Load RSI Data ===
 async function loadRsi() {
   try {
     const res = await fetch('/api/rsi');
     const json = await res.json();
     if (!json.success) throw new Error(json.error);
-
-    allRsiData = json.data.list || [];
-    document.getElementById('statTotalCoins').textContent = allRsiData.length;
+    allRsiData = getDataArray(json);
+    document.getElementById('statTotal').textContent = allRsiData.length;
     const high = allRsiData.filter(c => parseFloat(c.rsi4h || 0) >= 70);
     const low = allRsiData.filter(c => parseFloat(c.rsi4h || 0) <= 30);
-    const neutral = allRsiData.filter(c => {
-      const v = parseFloat(c.rsi4h || 0);
-      return v > 30 && v < 70;
-    });
     document.getElementById('statOverbought').textContent = high.length;
     document.getElementById('statOversold').textContent = low.length;
-    document.getElementById('statNeutral').textContent = neutral.length;
-
+    document.getElementById('statNeutral').textContent = allRsiData.length - high.length - low.length;
     renderRsiTable(allRsiData);
     renderExtremeRsi(high.slice(0, 5), low.slice(0, 5));
     renderRsiChart(allRsiData);
-    document.getElementById('rsiCount').textContent = allRsiData.length + ' coins';
-
-    const now = new Date();
-    document.getElementById('lastUpdate').textContent = now.toLocaleTimeString();
+    document.getElementById('rsiCount').textContent = allRsiData.length + ' assets';
+    document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
   } catch (e) {
-    console.error('RSI load error:', e);
-    document.getElementById('rsiTableBody').innerHTML = '<tr><td colspan="8" class="px-4 py-8 text-center text-[#ef4444]">Failed to load data. Retrying in 5s...</td></tr>';
-    setTimeout(loadRsi, 5000);
+    console.error('RSI error:', e);
+    document.getElementById('rsiTableBody').innerHTML = '<tr><td colspan="8" class="p-8 text-center"><div class="error-state"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg><div class="text-sm font-medium mb-1">Failed to load RSI data</div><div class="text-xs opacity-60">' + e.message + '</div></div></td></tr>';
   }
 }
 
 function renderRsiTable(data) {
   const tbody = document.getElementById('rsiTableBody');
-  tbody.innerHTML = data.slice(0, 100).map((coin, i) => {
-    const change = coin.priceChangePercent24h || 0;
-    return `<tr class="table-row">
-      <td class="px-4 py-3 text-[#64748b] mono">${coin.rank || i+1}</td>
-      <td class="px-4 py-3">
-        <div class="flex items-center gap-2">
-          <div class="w-7 h-7 rounded-full bg-gradient-to-br from-[#232a3b] to-[#1a1f2e] flex items-center justify-center text-xs font-bold">${(coin.symbol || '??').slice(0,2)}</div>
-          <span class="font-medium">${coin.symbol || 'Unknown'}</span>
-        </div>
-      </td>
-      <td class="px-4 py-3 text-right mono font-medium">${formatPrice(coin.price)}</td>
-      <td class="px-4 py-3 text-right">
-        <span class="inline-block px-2 py-0.5 rounded-md text-xs font-medium mono" style="color:${getRsiColor(coin.rsi15m)};background:${getRsiBg(coin.rsi15m)}">${coin.rsi15m || '--'}</span>
-      </td>
-      <td class="px-4 py-3 text-right">
-        <span class="inline-block px-2 py-0.5 rounded-md text-xs font-medium mono" style="color:${getRsiColor(coin.rsi1h)};background:${getRsiBg(coin.rsi1h)}">${coin.rsi1h || '--'}</span>
-      </td>
-      <td class="px-4 py-3 text-right">
-        <span class="inline-block px-2 py-0.5 rounded-md text-xs font-bold mono" style="color:${getRsiColor(coin.rsi4h)};background:${getRsiBg(coin.rsi4h)}">${coin.rsi4h || '--'}</span>
-      </td>
-      <td class="px-4 py-3 text-right">
-        <span class="inline-block px-2 py-0.5 rounded-md text-xs font-medium mono" style="color:${getRsiColor(coin.rsi24h)};background:${getRsiBg(coin.rsi24h)}">${coin.rsi24h || '--'}</span>
-      </td>
-      <td class="px-4 py-3 text-right hide-mobile">
-        <span class="text-xs font-medium mono" style="color:${getChangeColor(change)}">${change > 0 ? '+' : ''}${parseFloat(change).toFixed(2)}%</span>
-      </td>
-    </tr>`;
+  tbody.innerHTML = data.slice(0, 100).map((c, i) => {
+    const ch = c.priceChangePercent24h || 0;
+    return '<tr class="enter" style="animation-delay:' + (i*0.02) + 's;animation-fill-mode:both;"><td class="text-[#4a5568] mono text-xs">' + (c.rank || i+1) + '</td><td><div class="flex items-center gap-2.5"><div class="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold" style="background: linear-gradient(135deg, #1a2035, #0d111f);">' + (c.symbol || '??').slice(0,2) + '</div><span class="font-medium text-sm">' + (c.symbol || 'Unknown') + '</span></div></td><td class="text-right mono font-medium text-sm">' + fmtPrice(c.price) + '</td><td class="text-right">' + badge(c.rsi15m, 'rsi') + '</td><td class="text-right">' + badge(c.rsi1h, 'rsi') + '</td><td class="text-right">' + badge(c.rsi4h, 'rsi') + '</td><td class="text-right">' + badge(c.rsi24h, 'rsi') + '</td><td class="text-right hide-mobile">' + badge(ch, 'change') + '</td></tr>';
   }).join('');
 }
 
 function renderExtremeRsi(high, low) {
-  const container = document.getElementById('extremeRsi');
+  const el = document.getElementById('extremeRsi');
   let html = '';
-  if (high.length > 0) {
-    html += '<div class="text-xs text-[#ef4444] font-medium uppercase tracking-wider mb-2">Overbought (RSI ≥ 70)</div>';
-    html += high.map(c => `
-      <div class="flex items-center justify-between p-2 rounded-lg bg-[#ef4444]/5 border border-[#ef4444]/10">
-        <div class="flex items-center gap-2">
-          <span class="font-medium text-sm">${c.symbol}</span>
-          <span class="text-xs text-[#64748b] mono">${formatPrice(c.price)}</span>
-        </div>
-        <span class="text-sm font-bold mono text-[#ef4444]">${c.rsi4h}</span>
-      </div>
-    `).join('');
+  if (high.length) {
+    html += '<div class="text-[10px] font-bold uppercase tracking-widest mb-2" style="color: var(--danger);">Overbought</div>';
+    html += high.map(c => '<div class="flex items-center justify-between p-3 rounded-xl enter" style="background: var(--danger-bg); border: 1px solid rgba(255,71,87,0.1); animation-delay:0.05s;"><div class="flex items-center gap-2"><span class="font-semibold text-sm">' + c.symbol + '</span><span class="text-[11px] text-[#4a5568] mono">' + fmtPrice(c.price) + '</span></div><span class="font-bold mono text-sm" style="color: var(--danger);">' + c.rsi4h + '</span></div>').join('');
   }
-
-  if (low.length > 0) {
-    html += '<div class="text-xs text-[#22c55e] font-medium uppercase tracking-wider mb-2 mt-4">Oversold (RSI ≤ 30)</div>';
-    html += low.map(c => `
-      <div class="flex items-center justify-between p-2 rounded-lg bg-[#22c55e]/5 border border-[#22c55e]/10">
-        <div class="flex items-center gap-2">
-          <span class="font-medium text-sm">${c.symbol}</span>
-          <span class="text-xs text-[#64748b] mono">${formatPrice(c.price)}</span>
-        </div>
-        <span class="text-sm font-bold mono text-[#22c55e]">${c.rsi4h}</span>
-      </div>
-    `).join('');
+  if (low.length) {
+    html += '<div class="text-[10px] font-bold uppercase tracking-widest mb-2 mt-4" style="color: var(--success);">Oversold</div>';
+    html += low.map(c => '<div class="flex items-center justify-between p-3 rounded-xl enter" style="background: var(--success-bg); border: 1px solid rgba(46,213,115,0.1); animation-delay:0.1s;"><div class="flex items-center gap-2"><span class="font-semibold text-sm">' + c.symbol + '</span><span class="text-[11px] text-[#4a5568] mono">' + fmtPrice(c.price) + '</span></div><span class="font-bold mono text-sm" style="color: var(--success);">' + c.rsi4h + '</span></div>').join('');
   }
-
-  container.innerHTML = html || '<div class="text-[#64748b] text-sm">No extreme values</div>';
+  el.innerHTML = html || '<div class="text-[#4a5568] text-sm py-4 text-center">No extreme values detected</div>';
 }
 
 function renderRsiChart(data) {
   const ctx = document.getElementById('rsiChart').getContext('2d');
   const sorted = [...data].sort((a,b) => parseFloat(b.rsi4h || 0) - parseFloat(a.rsi4h || 0)).slice(0, 20);
-
   if (charts.rsi) charts.rsi.destroy();
   charts.rsi = new Chart(ctx, {
     type: 'bar',
@@ -741,174 +645,179 @@ function renderRsiChart(data) {
       datasets: [{
         label: 'RSI 4h',
         data: sorted.map(c => parseFloat(c.rsi4h || 0)),
-        backgroundColor: sorted.map(c => {
-          const v = parseFloat(c.rsi4h || 0);
-          if (v >= 70) return 'rgba(239,68,68,0.7)';
-          if (v <= 30) return 'rgba(34,197,94,0.7)';
-          return 'rgba(0,212,170,0.5)';
-        }),
-        borderColor: sorted.map(c => {
-          const v = parseFloat(c.rsi4h || 0);
-          if (v >= 70) return '#ef4444';
-          if (v <= 30) return '#22c55e';
-          return '#00d4aa';
-        }),
-        borderWidth: 1,
-        borderRadius: 4,
+        backgroundColor: sorted.map(c => { const v = parseFloat(c.rsi4h || 0); if (v >= 70) return 'rgba(255,71,87,0.7)'; if (v <= 30) return 'rgba(46,213,115,0.7)'; return 'rgba(0,229,192,0.5)'; }),
+        borderColor: sorted.map(c => { const v = parseFloat(c.rsi4h || 0); if (v >= 70) return '#ff4757'; if (v <= 30) return '#2ed573'; return '#00e5c0'; }),
+        borderWidth: 1, borderRadius: 6, borderSkipped: false,
       }]
     },
     options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          backgroundColor: '#1a1f2e',
-          borderColor: '#2d3748',
-          borderWidth: 1,
-          titleColor: '#f0f4f8',
-          bodyColor: '#94a3b8',
-          padding: 10,
-          cornerRadius: 8,
-        }
-      },
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { backgroundColor: '#131829', borderColor: '#1e2740', borderWidth: 1, titleColor: '#e8ecf4', bodyColor: '#8b95a8', padding: 12, cornerRadius: 10, displayColors: false } },
       scales: {
-        x: {
-          ticks: { color: '#64748b', font: { size: 10 } },
-          grid: { display: false }
-        },
-        y: {
-          ticks: { color: '#64748b', font: { size: 10 } },
-          grid: { color: 'rgba(45,55,72,0.3)' },
-          min: 0,
-          max: 100,
-        }
+        x: { ticks: { color: '#4a5568', font: { size: 10, family: 'JetBrains Mono' } }, grid: { display: false } },
+        y: { ticks: { color: '#4a5568', font: { size: 10 } }, grid: { color: 'rgba(30,39,64,0.4)' }, min: 0, max: 100 }
       }
     }
   });
 }
 
-function sortRsi(field) {
-  currentRsiSort = field;
-  const sorted = [...allRsiData].sort((a,b) => parseFloat(b[field] || 0) - parseFloat(a[field] || 0));
-  renderRsiTable(sorted);
-  renderRsiChart(sorted);
-}
+function sortRsi(field) { currentRsiSort = field; const sorted = [...allRsiData].sort((a,b) => parseFloat(b[field] || 0) - parseFloat(a[field] || 0)); renderRsiTable(sorted); renderRsiChart(sorted); }
+function filterRsiTable() { const q = document.getElementById('rsiSearch').value.toLowerCase(); const filtered = allRsiData.filter(c => (c.symbol || '').toLowerCase().includes(q)); renderRsiTable(filtered); document.getElementById('rsiCount').textContent = filtered.length + ' assets'; }
 
-function filterRsiTable() {
-  const query = document.getElementById('rsiSearch').value.toLowerCase();
-  const filtered = allRsiData.filter(c => (c.symbol || '').toLowerCase().includes(query));
-  renderRsiTable(filtered);
-  document.getElementById('rsiCount').textContent = filtered.length + ' coins';
-}
-
-// === Load Funding ===
 async function loadFunding() {
   try {
     const res = await fetch('/api/funding');
     const json = await res.json();
     if (!json.success) throw new Error(json.error);
-
+    const data = getDataArray(json);
+    document.getElementById('fundingCount').textContent = data.length + ' rates';
     const tbody = document.getElementById('fundingTableBody');
-    const data = json.data.list || [];
-    tbody.innerHTML = data.slice(0, 50).map(item => {
+    tbody.innerHTML = data.slice(0, 50).map((item, i) => {
       const rate = parseFloat(item.fundingRate || 0);
       const annual = rate * 3 * 365;
-      return `<tr class="table-row">
-        <td class="px-4 py-3 font-medium">${item.exName || 'Unknown'}</td>
-        <td class="px-4 py-3">${item.symbol || '--'}</td>
-        <td class="px-4 py-3 text-right mono font-medium" style="color:${rate > 0 ? '#ef4444' : rate < 0 ? '#22c55e' : '#94a3b8'}">${(rate*100).toFixed(4)}%</td>
-        <td class="px-4 py-3 text-right mono text-[#64748b]">${(annual*100).toFixed(2)}%</td>
-      </tr>`;
+      return '<tr class="enter" style="animation-delay:' + (i*0.02) + 's;animation-fill-mode:both;"><td class="font-medium text-sm">' + (item.exName || 'Unknown') + '</td><td class="text-sm">' + (item.symbol || '--') + '</td><td class="text-right">' + badge(rate, 'funding') + '</td><td class="text-right mono text-[#8b95a8] text-sm">' + (annual*100).toFixed(2) + '%</td><td class="text-right hide-mobile text-[#4a5568] text-xs mono">' + (item.time || '--') + '</td></tr>';
     }).join('');
-  } catch (e) {
-    console.error('Funding error:', e);
-  }
+    const pos = data.filter(d => parseFloat(d.fundingRate || 0) > 0).length;
+    const neg = data.filter(d => parseFloat(d.fundingRate || 0) < 0).length;
+    const neu = data.length - pos - neg;
+    const ctx = document.getElementById('fundingChart').getContext('2d');
+    if (charts.funding) charts.funding.destroy();
+    charts.funding = new Chart(ctx, {
+      type: 'doughnut',
+      data: { labels: ['Positive', 'Negative', 'Neutral'], datasets: [{ data: [pos, neg, neu], backgroundColor: ['rgba(255,71,87,0.7)', 'rgba(46,213,115,0.7)', 'rgba(139,149,168,0.3)'], borderColor: ['#ff4757', '#2ed573', '#8b95a8'], borderWidth: 2 }] },
+      options: { responsive: true, maintainAspectRatio: false, cutout: '65%', plugins: { legend: { position: 'right', labels: { color: '#8b95a8', font: { size: 11 }, boxWidth: 12 } } } }
+    });
+    const top = [...data].sort((a,b) => parseFloat(b.fundingRate || 0) - parseFloat(a.fundingRate || 0)).slice(0, 5);
+    document.getElementById('fundingTop').innerHTML = top.map((item, i) => '<div class="flex items-center justify-between p-3 rounded-xl enter" style="background: var(--bg-elevated); border: 1px solid var(--border); animation-delay:' + (i*0.05) + 's;"><div class="flex items-center gap-2"><span class="text-[#4a5568] mono text-xs w-5">' + (i+1) + '</span><span class="font-medium text-sm">' + item.symbol + '</span><span class="text-[11px] text-[#4a5568]">' + item.exName + '</span></div>' + badge(item.fundingRate, 'funding') + '</div>').join('');
+  } catch (e) { console.error('Funding error:', e); document.getElementById('fundingTableBody').innerHTML = '<tr><td colspan="5" class="p-8 text-center text-[#ff4757]">Error: ' + e.message + '</td></tr>'; }
 }
 
-// === Load Liquidation ===
 async function loadLiquidation() {
   try {
     const res = await fetch('/api/liquidation');
     const json = await res.json();
     if (!json.success) throw new Error(json.error);
-
-    const data = json.data;
-    const container = document.getElementById('liquidationContent');
-    container.innerHTML = `<pre class="text-xs text-[#94a3b8] mono overflow-auto max-h-96">${JSON.stringify(data, null, 2)}</pre>`;
-  } catch (e) {
-    console.error('Liquidation error:', e);
-  }
+    const data = getDataObj(json);
+    document.getElementById('liquidationContent').innerHTML = '<pre class="text-xs mono overflow-auto max-h-96 p-4 rounded-xl" style="background: var(--bg-elevated); color: #8b95a8; border: 1px solid var(--border);">' + JSON.stringify(data, null, 2) + '</pre>';
+    let longVal = 0, shortVal = 0;
+    if (data.longLiquidationUsd) longVal = parseFloat(data.longLiquidationUsd);
+    if (data.shortLiquidationUsd) shortVal = parseFloat(data.shortLiquidationUsd);
+    if (data.buyLiquidationUsd) longVal = parseFloat(data.buyLiquidationUsd);
+    if (data.sellLiquidationUsd) shortVal = parseFloat(data.sellLiquidationUsd);
+    const ctx1 = document.getElementById('liqChart').getContext('2d');
+    if (charts.liq) charts.liq.destroy();
+    charts.liq = new Chart(ctx1, {
+      type: 'doughnut',
+      data: { labels: ['Long', 'Short'], datasets: [{ data: [longVal || 1, shortVal || 1], backgroundColor: ['rgba(46,213,115,0.6)', 'rgba(255,71,87,0.6)'], borderColor: ['#2ed573', '#ff4757'], borderWidth: 2 }] },
+      options: { responsive: true, maintainAspectRatio: false, cutout: '60%', plugins: { legend: { position: 'bottom', labels: { color: '#8b95a8' } } } }
+    });
+    const ctx2 = document.getElementById('liqLongShortChart').getContext('2d');
+    if (charts.liqLS) charts.liqLS.destroy();
+    charts.liqLS = new Chart(ctx2, {
+      type: 'bar',
+      data: { labels: ['Long Liquidations', 'Short Liquidations'], datasets: [{ data: [longVal || 0, shortVal || 0], backgroundColor: ['#2ed573', '#ff4757'], borderRadius: 8 }] },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { grid: { color: 'rgba(30,39,64,0.4)' }, ticks: { color: '#4a5568', callback: v => fmtNum(v) } }, x: { grid: { display: false }, ticks: { color: '#8b95a8' } } } }
+    });
+  } catch (e) { console.error('Liquidation error:', e); document.getElementById('liquidationContent').innerHTML = '<div class="error-state"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg><div class="text-sm font-medium mb-1">Liquidation data unavailable</div><div class="text-xs opacity-60">' + e.message + '</div></div>'; }
 }
 
-// === Load Market Cap ===
+async function loadOI() {
+  try {
+    const res = await fetch('/api/openinterest');
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error);
+    const data = getDataArray(json);
+    document.getElementById('oiContent').innerHTML = '<pre class="text-xs mono overflow-auto max-h-96 p-4 rounded-xl" style="background: var(--bg-elevated); color: #8b95a8; border: 1px solid var(--border);">' + JSON.stringify(data.slice(0, 20), null, 2) + '</pre>';
+    const exchanges = {};
+    data.forEach(d => { const ex = d.exchange || d.exName || 'Other'; exchanges[ex] = (exchanges[ex] || 0) + parseFloat(d.openInterest || d.oi || 0); });
+    const ctx1 = document.getElementById('oiChart').getContext('2d');
+    if (charts.oi) charts.oi.destroy();
+    charts.oi = new Chart(ctx1, {
+      type: 'polarArea',
+      data: { labels: Object.keys(exchanges).slice(0, 8), datasets: [{ data: Object.values(exchanges).slice(0, 8), backgroundColor: ['rgba(0,229,192,0.5)', 'rgba(55,66,250,0.5)', 'rgba(255,71,87,0.5)', 'rgba(46,213,115,0.5)', 'rgba(255,165,2,0.5)', 'rgba(139,149,168,0.4)', 'rgba(0,229,192,0.3)', 'rgba(55,66,250,0.3)'] }] },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { color: '#8b95a8', font: { size: 10 } } } }, scales: { r: { grid: { color: 'rgba(30,39,64,0.4)' }, ticks: { color: '#4a5568', backdropColor: 'transparent' } } } }
+    });
+    const ctx2 = document.getElementById('oiChangeChart').getContext('2d');
+    const changeData = data.slice(0, 10).map(d => parseFloat(d.oiChange || d.change24h || d.change || 0));
+    if (charts.oiCh) charts.oiCh.destroy();
+    charts.oiCh = new Chart(ctx2, {
+      type: 'line',
+      data: { labels: data.slice(0, 10).map(d => d.symbol || d.coin || '??'), datasets: [{ label: 'OI Change %', data: changeData, borderColor: '#00e5c0', backgroundColor: 'rgba(0,229,192,0.1)', fill: true, tension: 0.4, pointRadius: 4, pointBackgroundColor: '#00e5c0' }] },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { grid: { color: 'rgba(30,39,64,0.4)' }, ticks: { color: '#4a5568' } }, x: { grid: { display: false }, ticks: { color: '#4a5568', font: { size: 10 } } } } }
+    });
+  } catch (e) { console.error('OI error:', e); document.getElementById('oiContent').innerHTML = '<div class="error-state"><div class="text-sm font-medium">Open Interest data unavailable</div><div class="text-xs opacity-60">' + e.message + '</div></div>'; }
+}
+
 async function loadMarketcap() {
   try {
     const res = await fetch('/api/marketcap');
     const json = await res.json();
     if (!json.success) throw new Error(json.error);
-
-    const tbody = document.getElementById('marketcapTableBody');
-    const data = json.data.list || [];
+    const data = getDataArray(json);
+    document.getElementById('mcCount').textContent = data.length + ' assets';
+    const tbody = document.getElementById('mcTableBody');
     tbody.innerHTML = data.slice(0, 50).map((item, i) => {
-      const change = item.priceChangePercent24h || 0;
-      return `<tr class="table-row">
-        <td class="px-4 py-3 text-[#64748b] mono">${item.rank || i+1}</td>
-        <td class="px-4 py-3">
-          <div class="flex items-center gap-2">
-            <div class="w-7 h-7 rounded-full bg-gradient-to-br from-[#232a3b] to-[#1a1f2e] flex items-center justify-center text-xs font-bold">${(item.symbol || '??').slice(0,2)}</div>
-            <span class="font-medium">${item.symbol || 'Unknown'}</span>
-          </div>
-        </td>
-        <td class="px-4 py-3 text-right mono font-medium">${formatPrice(item.price)}</td>
-        <td class="px-4 py-3 text-right mono">$${formatNumber(item.marketCap)}</td>
-        <td class="px-4 py-3 text-right mono font-medium" style="color:${getChangeColor(change)}">${change > 0 ? '+' : ''}${parseFloat(change).toFixed(2)}%</td>
-        <td class="px-4 py-3 text-right mono text-[#64748b] hide-mobile">$${formatNumber(item.volume24h)}</td>
-      </tr>`;
+      const ch = item.priceChangePercent24h || 0;
+      return '<tr class="enter" style="animation-delay:' + (i*0.02) + 's;animation-fill-mode:both;"><td class="text-[#4a5568] mono text-xs">' + (item.rank || i+1) + '</td><td><div class="flex items-center gap-2.5"><div class="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold" style="background: linear-gradient(135deg, #1a2035, #0d111f);">' + (item.symbol || '??').slice(0,2) + '</div><span class="font-medium text-sm">' + (item.symbol || 'Unknown') + '</span></div></td><td class="text-right mono font-medium text-sm">' + fmtPrice(item.price) + '</td><td class="text-right mono text-sm">$' + fmtNum(item.marketCap) + '</td><td class="text-right">' + badge(ch, 'change') + '</td><td class="text-right hide-mobile mono text-[#8b95a8] text-sm">$' + fmtNum(item.volume24h) + '</td></tr>';
     }).join('');
-  } catch (e) {
-    console.error('Marketcap error:', e);
-  }
+    const ctx = document.getElementById('mcChart').getContext('2d');
+    const top20 = data.slice(0, 20);
+    if (charts.mc) charts.mc.destroy();
+    charts.mc = new Chart(ctx, {
+      type: 'bar',
+      data: { labels: top20.map(d => d.symbol), datasets: [
+        { label: 'Market Cap', data: top20.map(d => parseFloat(d.marketCap || 0)), backgroundColor: 'rgba(0,229,192,0.5)', borderColor: '#00e5c0', borderWidth: 1, borderRadius: 6, yAxisID: 'y' },
+        { label: 'Volume 24h', data: top20.map(d => parseFloat(d.volume24h || 0)), backgroundColor: 'rgba(55,66,250,0.4)', borderColor: '#3742fa', borderWidth: 1, borderRadius: 6, yAxisID: 'y1' }
+      ]},
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#8b95a8' } } }, scales: { x: { ticks: { color: '#4a5568', font: { size: 10 } }, grid: { display: false } }, y: { type: 'logarithmic', position: 'left', grid: { color: 'rgba(30,39,64,0.4)' }, ticks: { color: '#4a5568', callback: v => fmtNum(v) } }, y1: { type: 'logarithmic', position: 'right', grid: { display: false }, ticks: { color: '#4a5568', callback: v => fmtNum(v) } } } }
+    });
+    const gainers = [...data].sort((a,b) => parseFloat(b.priceChangePercent24h || 0) - parseFloat(a.priceChangePercent24h || 0)).slice(0, 5);
+    document.getElementById('mcGainers').innerHTML = gainers.map((c, i) => '<div class="flex items-center justify-between p-3 rounded-xl enter" style="background: var(--bg-elevated); border: 1px solid var(--border); animation-delay:' + (i*0.05) + 's;"><div class="flex items-center gap-2"><span class="text-[#4a5568] mono text-xs w-5">' + (i+1) + '</span><span class="font-medium text-sm">' + c.symbol + '</span></div>' + badge(c.priceChangePercent24h, 'change') + '</div>').join('');
+  } catch (e) { console.error('Marketcap error:', e); document.getElementById('mcTableBody').innerHTML = '<tr><td colspan="6" class="p-8 text-center text-[#ff4757]">Error: ' + e.message + '</td></tr>'; }
 }
 
-// === Load Futures Stats ===
 async function loadFutures() {
   try {
     const res = await fetch('/api/futures-stats');
     const json = await res.json();
     if (!json.success) throw new Error(json.error);
-
-    const data = json.data;
+    const data = getDataObj(json);
     const grid = document.getElementById('futuresStatsGrid');
-    grid.innerHTML = Object.entries(data).map(([key, val]) => `
-      <div class="glass-card p-4">
-        <div class="text-xs text-[#64748b] uppercase tracking-wider font-medium mb-2">${key}</div>
-        <div class="text-lg font-bold mono">${typeof val === 'number' ? formatNumber(val) : JSON.stringify(val).slice(0, 50)}</div>
-      </div>
-    `).join('');
-  } catch (e) {
-    console.error('Futures stats error:', e);
-  }
+    const entries = Object.entries(data).slice(0, 8);
+    grid.innerHTML = entries.map(([key, val], i) => '<div class="card p-5 enter" style="animation-delay:' + (i*0.06) + 's;"><div class="text-[10px] font-bold uppercase tracking-widest text-[#4a5568] mb-2">' + key.replace(/([A-Z])/g, ' $1').trim() + '</div><div class="text-xl font-bold mono">' + (typeof val === 'number' ? fmtNum(val) : JSON.stringify(val).slice(0, 30)) + '</div></div>').join('');
+    document.getElementById('futuresContent').innerHTML = '<pre class="text-xs mono overflow-auto max-h-96 p-4 rounded-xl" style="background: var(--bg-elevated); color: #8b95a8; border: 1px solid var(--border);">' + JSON.stringify(data, null, 2) + '</pre>';
+  } catch (e) { console.error('Futures error:', e); document.getElementById('futuresContent').innerHTML = '<div class="error-state"><div class="text-sm font-medium">Futures data unavailable</div><div class="text-xs opacity-60">' + e.message + '</div></div>'; }
 }
 
-// === Load ETF ===
 async function loadEtf() {
   try {
     const res = await fetch('/api/etf');
     const json = await res.json();
     if (!json.success) throw new Error(json.error);
-
-    const container = document.getElementById('etfContent');
-    container.innerHTML = `<pre class="text-xs text-[#94a3b8] mono overflow-auto max-h-96">${JSON.stringify(json.data, null, 2)}</pre>`;
-  } catch (e) {
-    console.error('ETF error:', e);
-  }
+    const data = getDataObj(json);
+    document.getElementById('etfContent').innerHTML = '<pre class="text-xs mono overflow-auto max-h-96 p-4 rounded-xl" style="background: var(--bg-elevated); color: #8b95a8; border: 1px solid var(--border);">' + JSON.stringify(data, null, 2) + '</pre>';
+    const etfList = getDataArray(json);
+    if (etfList.length > 0) {
+      const ctx1 = document.getElementById('etfChart').getContext('2d');
+      if (charts.etf) charts.etf.destroy();
+      charts.etf = new Chart(ctx1, {
+        type: 'doughnut',
+        data: { labels: etfList.slice(0, 6).map(d => d.name || d.ticker || 'ETF'), datasets: [{ data: etfList.slice(0, 6).map(d => parseFloat(d.flow || d.dailyFlow || d.value || 0)), backgroundColor: ['rgba(0,229,192,0.7)', 'rgba(55,66,250,0.7)', 'rgba(255,71,87,0.7)', 'rgba(46,213,115,0.7)', 'rgba(255,165,2,0.7)', 'rgba(139,149,168,0.5)'], borderColor: ['#00e5c0', '#3742fa', '#ff4757', '#2ed573', '#ffa502', '#8b95a8'], borderWidth: 2 }] },
+        options: { responsive: true, maintainAspectRatio: false, cutout: '60%', plugins: { legend: { position: 'right', labels: { color: '#8b95a8', font: { size: 10 } } } } }
+      });
+    }
+    const ctx2 = document.getElementById('etfTrendChart').getContext('2d');
+    if (charts.etfTrend) charts.etfTrend.destroy();
+    charts.etfTrend = new Chart(ctx2, {
+      type: 'line',
+      data: { labels: etfList.slice(0, 10).map((d,i) => d.date || d.day || ('Day ' + (i+1))), datasets: [{ label: 'Flow ($M)', data: etfList.slice(0, 10).map(d => parseFloat(d.flow || d.dailyFlow || d.value || 0) / 1e6), borderColor: '#00e5c0', backgroundColor: 'rgba(0,229,192,0.1)', fill: true, tension: 0.4, pointRadius: 3 }] },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { grid: { color: 'rgba(30,39,64,0.4)' }, ticks: { color: '#4a5568' } }, x: { grid: { display: false }, ticks: { color: '#4a5568', font: { size: 10 } } } } }
+    });
+  } catch (e) { console.error('ETF error:', e); document.getElementById('etfContent').innerHTML = '<div class="error-state"><div class="text-sm font-medium">ETF data unavailable</div><div class="text-xs opacity-60">' + e.message + '</div></div>'; }
 }
 
-// === Init ===
 document.addEventListener('DOMContentLoaded', () => {
   loadRsi();
-  // Auto refresh every 60s
   setInterval(loadRsi, 60000);
 });
 </script>
