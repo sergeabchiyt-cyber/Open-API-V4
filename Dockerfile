@@ -1,7 +1,6 @@
 FROM python:3.11-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc libffi-dev && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends     gcc libffi-dev && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -75,8 +74,10 @@ def fetch_and_decrypt(url: str, params: dict = None, timeout: int = 30) -> Dict[
     user = resp.headers.get("user")
     v = resp.headers.get("v")
     if not user or not v:
-        logger.warning(f"Missing user/v headers at {url}. Headers: {dict(resp.headers)}")
-        raise ValueError(f"Missing user/v headers at {url}")
+        try:
+            return resp.json()
+        except:
+            return {"raw": resp.text}
     return decrypt(resp.text, user, v, url)
 PYEOF
 
@@ -104,7 +105,6 @@ async def index(request: Request):
     return templates.TemplateResponse(request, "index.html", {})
 
 def extract_data(raw):
-    """Flexible data extraction - handles .list, .data, and root array"""
     if isinstance(raw, list):
         return raw
     if isinstance(raw, dict):
@@ -113,6 +113,11 @@ def extract_data(raw):
         if "data" in raw:
             d = raw["data"]
             return d if isinstance(d, list) else [d]
+        # ETF nested structure
+        if "topInflowList" in raw:
+            return raw["topInflowList"]
+        if "inflowList" in raw:
+            return raw["inflowList"]
     return raw if isinstance(raw, list) else []
 
 @app.get("/api/rsi")
@@ -538,6 +543,15 @@ const charts = {};
 let allRsiData = [];
 let currentRsiSort = 'rsi4h';
 
+// === Defensive field access helpers ===
+function gv(obj, keys, fallback) {
+  if (!obj) return fallback;
+  for (const k of keys) {
+    if (obj[k] !== undefined && obj[k] !== null) return obj[k];
+  }
+  return fallback;
+}
+
 function getDataArray(json) {
   if (json.extracted && Array.isArray(json.extracted)) return json.extracted;
   if (json.data && Array.isArray(json.data)) return json.data;
@@ -563,15 +577,25 @@ function switchTab(tab) {
   if (loaders[tab] && !window[tab + 'Loaded']) { loaders[tab](); window[tab + 'Loaded'] = true; }
 }
 
-function getRsiColor(v) { v = parseFloat(v); if (v >= 70) return '#ff4757'; if (v <= 30) return '#2ed573'; return '#8b95a8'; }
-function getRsiBg(v) { v = parseFloat(v); if (v >= 70) return 'rgba(255,71,87,0.12)'; if (v <= 30) return 'rgba(46,213,115,0.12)'; return 'rgba(255,255,255,0.04)'; }
-function getChangeColor(v) { v = parseFloat(v); if (v > 0) return '#2ed573'; if (v < 0) return '#ff4757'; return '#8b95a8'; }
-function fmtPrice(p) { p = parseFloat(p); if (p >= 1000) return '$' + p.toLocaleString('en', {minimumFractionDigits: 2, maximumFractionDigits: 2}); if (p >= 1) return '$' + p.toFixed(4); return '$' + p.toFixed(6); }
-function fmtNum(n) { n = parseFloat(n); if (n >= 1e12) return (n/1e12).toFixed(2) + 'T'; if (n >= 1e9) return (n/1e9).toFixed(2) + 'B'; if (n >= 1e6) return (n/1e6).toFixed(2) + 'M'; if (n >= 1e3) return (n/1e3).toFixed(2) + 'K'; return n.toFixed(2); }
-function fmtPct(n) { n = parseFloat(n); return (n > 0 ? '+' : '') + n.toFixed(2) + '%'; }
-
+function fmtPrice(p) {
+  p = parseFloat(p);
+  if (isNaN(p)) return '$--';
+  if (p >= 1000) return '$' + p.toLocaleString('en', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  if (p >= 1) return '$' + p.toFixed(4);
+  return '$' + p.toFixed(6);
+}
+function fmtNum(n) {
+  n = parseFloat(n);
+  if (isNaN(n)) return '--';
+  if (n >= 1e12) return (n/1e12).toFixed(2) + 'T';
+  if (n >= 1e9) return (n/1e9).toFixed(2) + 'B';
+  if (n >= 1e6) return (n/1e6).toFixed(2) + 'M';
+  if (n >= 1e3) return (n/1e3).toFixed(2) + 'K';
+  return n.toFixed(2);
+}
 function badge(val, type) {
   const v = parseFloat(val);
+  if (isNaN(v)) return '<span class="badge badge-neutral">--</span>';
   if (type === 'rsi') {
     if (v >= 70) return '<span class="badge badge-red">' + v.toFixed(1) + '</span>';
     if (v <= 30) return '<span class="badge badge-green">' + v.toFixed(1) + '</span>';
@@ -589,6 +613,7 @@ function badge(val, type) {
   }
 }
 
+// === RSI ===
 async function loadRsi() {
   try {
     const res = await fetch('/api/rsi');
@@ -596,8 +621,8 @@ async function loadRsi() {
     if (!json.success) throw new Error(json.error);
     allRsiData = getDataArray(json);
     document.getElementById('statTotal').textContent = allRsiData.length;
-    const high = allRsiData.filter(c => parseFloat(c.rsi4h || 0) >= 70);
-    const low = allRsiData.filter(c => parseFloat(c.rsi4h || 0) <= 30);
+    const high = allRsiData.filter(c => parseFloat(gv(c, ['rsi4h','rsi_4h','rsi4H'], 0)) >= 70);
+    const low = allRsiData.filter(c => parseFloat(gv(c, ['rsi4h','rsi_4h','rsi4H'], 0)) <= 30);
     document.getElementById('statOverbought').textContent = high.length;
     document.getElementById('statOversold').textContent = low.length;
     document.getElementById('statNeutral').textContent = allRsiData.length - high.length - low.length;
@@ -615,8 +640,10 @@ async function loadRsi() {
 function renderRsiTable(data) {
   const tbody = document.getElementById('rsiTableBody');
   tbody.innerHTML = data.slice(0, 100).map((c, i) => {
-    const ch = c.priceChangePercent24h || 0;
-    return '<tr class="enter" style="animation-delay:' + (i*0.02) + 's;animation-fill-mode:both;"><td class="text-[#4a5568] mono text-xs">' + (c.rank || i+1) + '</td><td><div class="flex items-center gap-2.5"><div class="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold" style="background: linear-gradient(135deg, #1a2035, #0d111f);">' + (c.symbol || '??').slice(0,2) + '</div><span class="font-medium text-sm">' + (c.symbol || 'Unknown') + '</span></div></td><td class="text-right mono font-medium text-sm">' + fmtPrice(c.price) + '</td><td class="text-right">' + badge(c.rsi15m, 'rsi') + '</td><td class="text-right">' + badge(c.rsi1h, 'rsi') + '</td><td class="text-right">' + badge(c.rsi4h, 'rsi') + '</td><td class="text-right">' + badge(c.rsi24h, 'rsi') + '</td><td class="text-right hide-mobile">' + badge(ch, 'change') + '</td></tr>';
+    const sym = gv(c, ['symbol','s','sym','coinSymbol','name'], '??');
+    const price = gv(c, ['price','p','lastPrice','currentPrice'], 0);
+    const ch = gv(c, ['priceChangePercent24h','change24h','changePercent','priceChangePercent'], 0);
+    return '<tr class="enter" style="animation-delay:' + (i*0.02) + 's;animation-fill-mode:both;"><td class="text-[#4a5568] mono text-xs">' + (c.rank || i+1) + '</td><td><div class="flex items-center gap-2.5"><div class="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold" style="background: linear-gradient(135deg, #1a2035, #0d111f);">' + sym.slice(0,2) + '</div><span class="font-medium text-sm">' + sym + '</span></div></td><td class="text-right mono font-medium text-sm">' + fmtPrice(price) + '</td><td class="text-right">' + badge(gv(c,['rsi15m','rsi_15m'],0), 'rsi') + '</td><td class="text-right">' + badge(gv(c,['rsi1h','rsi_1h'],0), 'rsi') + '</td><td class="text-right">' + badge(gv(c,['rsi4h','rsi_4h','rsi4H'],0), 'rsi') + '</td><td class="text-right">' + badge(gv(c,['rsi24h','rsi_24h'],0), 'rsi') + '</td><td class="text-right hide-mobile">' + badge(ch, 'change') + '</td></tr>';
   }).join('');
 }
 
@@ -625,28 +652,28 @@ function renderExtremeRsi(high, low) {
   let html = '';
   if (high.length) {
     html += '<div class="text-[10px] font-bold uppercase tracking-widest mb-2" style="color: var(--danger);">Overbought</div>';
-    html += high.map(c => '<div class="flex items-center justify-between p-3 rounded-xl enter" style="background: var(--danger-bg); border: 1px solid rgba(255,71,87,0.1); animation-delay:0.05s;"><div class="flex items-center gap-2"><span class="font-semibold text-sm">' + c.symbol + '</span><span class="text-[11px] text-[#4a5568] mono">' + fmtPrice(c.price) + '</span></div><span class="font-bold mono text-sm" style="color: var(--danger);">' + c.rsi4h + '</span></div>').join('');
+    html += high.map(c => '<div class="flex items-center justify-between p-3 rounded-xl enter" style="background: var(--danger-bg); border: 1px solid rgba(255,71,87,0.1); animation-delay:0.05s;"><div class="flex items-center gap-2"><span class="font-semibold text-sm">' + gv(c,['symbol','s','sym'], '?') + '</span><span class="text-[11px] text-[#4a5568] mono">' + fmtPrice(gv(c,['price','p'],0)) + '</span></div><span class="font-bold mono text-sm" style="color: var(--danger);">' + gv(c,['rsi4h','rsi_4h'], '--') + '</span></div>').join('');
   }
   if (low.length) {
     html += '<div class="text-[10px] font-bold uppercase tracking-widest mb-2 mt-4" style="color: var(--success);">Oversold</div>';
-    html += low.map(c => '<div class="flex items-center justify-between p-3 rounded-xl enter" style="background: var(--success-bg); border: 1px solid rgba(46,213,115,0.1); animation-delay:0.1s;"><div class="flex items-center gap-2"><span class="font-semibold text-sm">' + c.symbol + '</span><span class="text-[11px] text-[#4a5568] mono">' + fmtPrice(c.price) + '</span></div><span class="font-bold mono text-sm" style="color: var(--success);">' + c.rsi4h + '</span></div>').join('');
+    html += low.map(c => '<div class="flex items-center justify-between p-3 rounded-xl enter" style="background: var(--success-bg); border: 1px solid rgba(46,213,115,0.1); animation-delay:0.1s;"><div class="flex items-center gap-2"><span class="font-semibold text-sm">' + gv(c,['symbol','s','sym'], '?') + '</span><span class="text-[11px] text-[#4a5568] mono">' + fmtPrice(gv(c,['price','p'],0)) + '</span></div><span class="font-bold mono text-sm" style="color: var(--success);">' + gv(c,['rsi4h','rsi_4h'], '--') + '</span></div>').join('');
   }
   el.innerHTML = html || '<div class="text-[#4a5568] text-sm py-4 text-center">No extreme values detected</div>';
 }
 
 function renderRsiChart(data) {
   const ctx = document.getElementById('rsiChart').getContext('2d');
-  const sorted = [...data].sort((a,b) => parseFloat(b.rsi4h || 0) - parseFloat(a.rsi4h || 0)).slice(0, 20);
+  const sorted = [...data].sort((a,b) => parseFloat(gv(b,['rsi4h','rsi_4h'],0)) - parseFloat(gv(a,['rsi4h','rsi_4h'],0))).slice(0, 20);
   if (charts.rsi) charts.rsi.destroy();
   charts.rsi = new Chart(ctx, {
     type: 'bar',
     data: {
-      labels: sorted.map(c => c.symbol),
+      labels: sorted.map(c => gv(c,['symbol','s','sym'], '?')),
       datasets: [{
         label: 'RSI 4h',
-        data: sorted.map(c => parseFloat(c.rsi4h || 0)),
-        backgroundColor: sorted.map(c => { const v = parseFloat(c.rsi4h || 0); if (v >= 70) return 'rgba(255,71,87,0.7)'; if (v <= 30) return 'rgba(46,213,115,0.7)'; return 'rgba(0,229,192,0.5)'; }),
-        borderColor: sorted.map(c => { const v = parseFloat(c.rsi4h || 0); if (v >= 70) return '#ff4757'; if (v <= 30) return '#2ed573'; return '#00e5c0'; }),
+        data: sorted.map(c => parseFloat(gv(c,['rsi4h','rsi_4h'],0))),
+        backgroundColor: sorted.map(c => { const v = parseFloat(gv(c,['rsi4h','rsi_4h'],0)); if (v >= 70) return 'rgba(255,71,87,0.7)'; if (v <= 30) return 'rgba(46,213,115,0.7)'; return 'rgba(0,229,192,0.5)'; }),
+        borderColor: sorted.map(c => { const v = parseFloat(gv(c,['rsi4h','rsi_4h'],0)); if (v >= 70) return '#ff4757'; if (v <= 30) return '#2ed573'; return '#00e5c0'; }),
         borderWidth: 1, borderRadius: 6, borderSkipped: false,
       }]
     },
@@ -661,9 +688,20 @@ function renderRsiChart(data) {
   });
 }
 
-function sortRsi(field) { currentRsiSort = field; const sorted = [...allRsiData].sort((a,b) => parseFloat(b[field] || 0) - parseFloat(a[field] || 0)); renderRsiTable(sorted); renderRsiChart(sorted); }
-function filterRsiTable() { const q = document.getElementById('rsiSearch').value.toLowerCase(); const filtered = allRsiData.filter(c => (c.symbol || '').toLowerCase().includes(q)); renderRsiTable(filtered); document.getElementById('rsiCount').textContent = filtered.length + ' assets'; }
+function sortRsi(field) { 
+  currentRsiSort = field; 
+  const sorted = [...allRsiData].sort((a,b) => parseFloat(gv(b,[field],0)) - parseFloat(gv(a,[field],0))); 
+  renderRsiTable(sorted); 
+  renderRsiChart(sorted); 
+}
+function filterRsiTable() { 
+  const q = document.getElementById('rsiSearch').value.toLowerCase(); 
+  const filtered = allRsiData.filter(c => (gv(c,['symbol','s','sym'], '')).toLowerCase().includes(q)); 
+  renderRsiTable(filtered); 
+  document.getElementById('rsiCount').textContent = filtered.length + ' assets'; 
+}
 
+// === Funding ===
 async function loadFunding() {
   try {
     const res = await fetch('/api/funding');
@@ -673,12 +711,15 @@ async function loadFunding() {
     document.getElementById('fundingCount').textContent = data.length + ' rates';
     const tbody = document.getElementById('fundingTableBody');
     tbody.innerHTML = data.slice(0, 50).map((item, i) => {
-      const rate = parseFloat(item.fundingRate || 0);
+      const ex = gv(item, ['exName','exchange','ex','platform'], 'Unknown');
+      const sym = gv(item, ['symbol','s','sym','coin'], '--');
+      const rate = parseFloat(gv(item, ['fundingRate','rate','funding_rate'], 0));
       const annual = rate * 3 * 365;
-      return '<tr class="enter" style="animation-delay:' + (i*0.02) + 's;animation-fill-mode:both;"><td class="font-medium text-sm">' + (item.exName || 'Unknown') + '</td><td class="text-sm">' + (item.symbol || '--') + '</td><td class="text-right">' + badge(rate, 'funding') + '</td><td class="text-right mono text-[#8b95a8] text-sm">' + (annual*100).toFixed(2) + '%</td><td class="text-right hide-mobile text-[#4a5568] text-xs mono">' + (item.time || '--') + '</td></tr>';
+      const ts = gv(item, ['time','timestamp','updateTime'], '--');
+      return '<tr class="enter" style="animation-delay:' + (i*0.02) + 's;animation-fill-mode:both;"><td class="font-medium text-sm">' + ex + '</td><td class="text-sm">' + sym + '</td><td class="text-right">' + badge(rate, 'funding') + '</td><td class="text-right mono text-[#8b95a8] text-sm">' + (isNaN(annual) ? '--' : (annual*100).toFixed(2) + '%') + '</td><td class="text-right hide-mobile text-[#4a5568] text-xs mono">' + ts + '</td></tr>';
     }).join('');
-    const pos = data.filter(d => parseFloat(d.fundingRate || 0) > 0).length;
-    const neg = data.filter(d => parseFloat(d.fundingRate || 0) < 0).length;
+    const pos = data.filter(d => parseFloat(gv(d, ['fundingRate','rate'], 0)) > 0).length;
+    const neg = data.filter(d => parseFloat(gv(d, ['fundingRate','rate'], 0)) < 0).length;
     const neu = data.length - pos - neg;
     const ctx = document.getElementById('fundingChart').getContext('2d');
     if (charts.funding) charts.funding.destroy();
@@ -687,11 +728,12 @@ async function loadFunding() {
       data: { labels: ['Positive', 'Negative', 'Neutral'], datasets: [{ data: [pos, neg, neu], backgroundColor: ['rgba(255,71,87,0.7)', 'rgba(46,213,115,0.7)', 'rgba(139,149,168,0.3)'], borderColor: ['#ff4757', '#2ed573', '#8b95a8'], borderWidth: 2 }] },
       options: { responsive: true, maintainAspectRatio: false, cutout: '65%', plugins: { legend: { position: 'right', labels: { color: '#8b95a8', font: { size: 11 }, boxWidth: 12 } } } }
     });
-    const top = [...data].sort((a,b) => parseFloat(b.fundingRate || 0) - parseFloat(a.fundingRate || 0)).slice(0, 5);
-    document.getElementById('fundingTop').innerHTML = top.map((item, i) => '<div class="flex items-center justify-between p-3 rounded-xl enter" style="background: var(--bg-elevated); border: 1px solid var(--border); animation-delay:' + (i*0.05) + 's;"><div class="flex items-center gap-2"><span class="text-[#4a5568] mono text-xs w-5">' + (i+1) + '</span><span class="font-medium text-sm">' + item.symbol + '</span><span class="text-[11px] text-[#4a5568]">' + item.exName + '</span></div>' + badge(item.fundingRate, 'funding') + '</div>').join('');
+    const top = [...data].sort((a,b) => parseFloat(gv(b,['fundingRate','rate'],0)) - parseFloat(gv(a,['fundingRate','rate'],0))).slice(0, 5);
+    document.getElementById('fundingTop').innerHTML = top.map((item, i) => '<div class="flex items-center justify-between p-3 rounded-xl enter" style="background: var(--bg-elevated); border: 1px solid var(--border); animation-delay:' + (i*0.05) + 's;"><div class="flex items-center gap-2"><span class="text-[#4a5568] mono text-xs w-5">' + (i+1) + '</span><span class="font-medium text-sm">' + gv(item,['symbol','s','sym'], '?') + '</span><span class="text-[11px] text-[#4a5568]">' + gv(item,['exName','exchange'], '') + '</span></div>' + badge(gv(item,['fundingRate','rate'],0), 'funding') + '</div>').join('');
   } catch (e) { console.error('Funding error:', e); document.getElementById('fundingTableBody').innerHTML = '<tr><td colspan="5" class="p-8 text-center text-[#ff4757]">Error: ' + e.message + '</td></tr>'; }
 }
 
+// === Liquidation ===
 async function loadLiquidation() {
   try {
     const res = await fetch('/api/liquidation');
@@ -704,6 +746,7 @@ async function loadLiquidation() {
     if (data.shortLiquidationUsd) shortVal = parseFloat(data.shortLiquidationUsd);
     if (data.buyLiquidationUsd) longVal = parseFloat(data.buyLiquidationUsd);
     if (data.sellLiquidationUsd) shortVal = parseFloat(data.sellLiquidationUsd);
+    if (data.liquidationH24VolUsd) { longVal = parseFloat(data.liquidationH24VolUsd) * 0.5; shortVal = parseFloat(data.liquidationH24VolUsd) * 0.5; }
     const ctx1 = document.getElementById('liqChart').getContext('2d');
     if (charts.liq) charts.liq.destroy();
     charts.liq = new Chart(ctx1, {
@@ -721,6 +764,7 @@ async function loadLiquidation() {
   } catch (e) { console.error('Liquidation error:', e); document.getElementById('liquidationContent').innerHTML = '<div class="error-state"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg><div class="text-sm font-medium mb-1">Liquidation data unavailable</div><div class="text-xs opacity-60">' + e.message + '</div></div>'; }
 }
 
+// === Open Interest ===
 async function loadOI() {
   try {
     const res = await fetch('/api/openinterest');
@@ -729,7 +773,7 @@ async function loadOI() {
     const data = getDataArray(json);
     document.getElementById('oiContent').innerHTML = '<pre class="text-xs mono overflow-auto max-h-96 p-4 rounded-xl" style="background: var(--bg-elevated); color: #8b95a8; border: 1px solid var(--border);">' + JSON.stringify(data.slice(0, 20), null, 2) + '</pre>';
     const exchanges = {};
-    data.forEach(d => { const ex = d.exchange || d.exName || 'Other'; exchanges[ex] = (exchanges[ex] || 0) + parseFloat(d.openInterest || d.oi || 0); });
+    data.forEach(d => { const ex = gv(d, ['exchange','exName','ex','platform'], 'Other'); const oi = parseFloat(gv(d, ['openInterest','oi','open_interest','totalOi'], 0)); exchanges[ex] = (exchanges[ex] || 0) + oi; });
     const ctx1 = document.getElementById('oiChart').getContext('2d');
     if (charts.oi) charts.oi.destroy();
     charts.oi = new Chart(ctx1, {
@@ -738,16 +782,17 @@ async function loadOI() {
       options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { color: '#8b95a8', font: { size: 10 } } } }, scales: { r: { grid: { color: 'rgba(30,39,64,0.4)' }, ticks: { color: '#4a5568', backdropColor: 'transparent' } } } }
     });
     const ctx2 = document.getElementById('oiChangeChart').getContext('2d');
-    const changeData = data.slice(0, 10).map(d => parseFloat(d.oiChange || d.change24h || d.change || 0));
+    const changeData = data.slice(0, 10).map(d => parseFloat(gv(d, ['oiChange','change24h','change','oi_change'], 0)));
     if (charts.oiCh) charts.oiCh.destroy();
     charts.oiCh = new Chart(ctx2, {
       type: 'line',
-      data: { labels: data.slice(0, 10).map(d => d.symbol || d.coin || '??'), datasets: [{ label: 'OI Change %', data: changeData, borderColor: '#00e5c0', backgroundColor: 'rgba(0,229,192,0.1)', fill: true, tension: 0.4, pointRadius: 4, pointBackgroundColor: '#00e5c0' }] },
+      data: { labels: data.slice(0, 10).map(d => gv(d, ['symbol','s','sym','coin'], '??')), datasets: [{ label: 'OI Change %', data: changeData, borderColor: '#00e5c0', backgroundColor: 'rgba(0,229,192,0.1)', fill: true, tension: 0.4, pointRadius: 4, pointBackgroundColor: '#00e5c0' }] },
       options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { grid: { color: 'rgba(30,39,64,0.4)' }, ticks: { color: '#4a5568' } }, x: { grid: { display: false }, ticks: { color: '#4a5568', font: { size: 10 } } } } }
     });
   } catch (e) { console.error('OI error:', e); document.getElementById('oiContent').innerHTML = '<div class="error-state"><div class="text-sm font-medium">Open Interest data unavailable</div><div class="text-xs opacity-60">' + e.message + '</div></div>'; }
 }
 
+// === Market Cap ===
 async function loadMarketcap() {
   try {
     const res = await fetch('/api/marketcap');
@@ -757,25 +802,30 @@ async function loadMarketcap() {
     document.getElementById('mcCount').textContent = data.length + ' assets';
     const tbody = document.getElementById('mcTableBody');
     tbody.innerHTML = data.slice(0, 50).map((item, i) => {
-      const ch = item.priceChangePercent24h || 0;
-      return '<tr class="enter" style="animation-delay:' + (i*0.02) + 's;animation-fill-mode:both;"><td class="text-[#4a5568] mono text-xs">' + (item.rank || i+1) + '</td><td><div class="flex items-center gap-2.5"><div class="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold" style="background: linear-gradient(135deg, #1a2035, #0d111f);">' + (item.symbol || '??').slice(0,2) + '</div><span class="font-medium text-sm">' + (item.symbol || 'Unknown') + '</span></div></td><td class="text-right mono font-medium text-sm">' + fmtPrice(item.price) + '</td><td class="text-right mono text-sm">$' + fmtNum(item.marketCap) + '</td><td class="text-right">' + badge(ch, 'change') + '</td><td class="text-right hide-mobile mono text-[#8b95a8] text-sm">$' + fmtNum(item.volume24h) + '</td></tr>';
+      const sym = gv(item, ['symbol','s','sym','coinSymbol','name'], 'Unknown');
+      const price = gv(item, ['price','p','currentPrice','lastPrice'], 0);
+      const mc = gv(item, ['marketCap','market_cap','mc','cap'], 0);
+      const ch = gv(item, ['priceChangePercent24h','change24h','changePercent','priceChangePercent'], 0);
+      const vol = gv(item, ['volume24h','volume_24h','vol','totalVolume'], 0);
+      return '<tr class="enter" style="animation-delay:' + (i*0.02) + 's;animation-fill-mode:both;"><td class="text-[#4a5568] mono text-xs">' + (item.rank || i+1) + '</td><td><div class="flex items-center gap-2.5"><div class="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold" style="background: linear-gradient(135deg, #1a2035, #0d111f);">' + sym.slice(0,2) + '</div><span class="font-medium text-sm">' + sym + '</span></div></td><td class="text-right mono font-medium text-sm">' + fmtPrice(price) + '</td><td class="text-right mono text-sm">$' + fmtNum(mc) + '</td><td class="text-right">' + badge(ch, 'change') + '</td><td class="text-right hide-mobile mono text-[#8b95a8] text-sm">$' + fmtNum(vol) + '</td></tr>';
     }).join('');
     const ctx = document.getElementById('mcChart').getContext('2d');
     const top20 = data.slice(0, 20);
     if (charts.mc) charts.mc.destroy();
     charts.mc = new Chart(ctx, {
       type: 'bar',
-      data: { labels: top20.map(d => d.symbol), datasets: [
-        { label: 'Market Cap', data: top20.map(d => parseFloat(d.marketCap || 0)), backgroundColor: 'rgba(0,229,192,0.5)', borderColor: '#00e5c0', borderWidth: 1, borderRadius: 6, yAxisID: 'y' },
-        { label: 'Volume 24h', data: top20.map(d => parseFloat(d.volume24h || 0)), backgroundColor: 'rgba(55,66,250,0.4)', borderColor: '#3742fa', borderWidth: 1, borderRadius: 6, yAxisID: 'y1' }
+      data: { labels: top20.map(d => gv(d,['symbol','s','sym'], '?')), datasets: [
+        { label: 'Market Cap', data: top20.map(d => parseFloat(gv(d,['marketCap','market_cap','mc'],0))), backgroundColor: 'rgba(0,229,192,0.5)', borderColor: '#00e5c0', borderWidth: 1, borderRadius: 6, yAxisID: 'y' },
+        { label: 'Volume 24h', data: top20.map(d => parseFloat(gv(d,['volume24h','volume_24h','vol'],0))), backgroundColor: 'rgba(55,66,250,0.4)', borderColor: '#3742fa', borderWidth: 1, borderRadius: 6, yAxisID: 'y1' }
       ]},
       options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#8b95a8' } } }, scales: { x: { ticks: { color: '#4a5568', font: { size: 10 } }, grid: { display: false } }, y: { type: 'logarithmic', position: 'left', grid: { color: 'rgba(30,39,64,0.4)' }, ticks: { color: '#4a5568', callback: v => fmtNum(v) } }, y1: { type: 'logarithmic', position: 'right', grid: { display: false }, ticks: { color: '#4a5568', callback: v => fmtNum(v) } } } }
     });
-    const gainers = [...data].sort((a,b) => parseFloat(b.priceChangePercent24h || 0) - parseFloat(a.priceChangePercent24h || 0)).slice(0, 5);
-    document.getElementById('mcGainers').innerHTML = gainers.map((c, i) => '<div class="flex items-center justify-between p-3 rounded-xl enter" style="background: var(--bg-elevated); border: 1px solid var(--border); animation-delay:' + (i*0.05) + 's;"><div class="flex items-center gap-2"><span class="text-[#4a5568] mono text-xs w-5">' + (i+1) + '</span><span class="font-medium text-sm">' + c.symbol + '</span></div>' + badge(c.priceChangePercent24h, 'change') + '</div>').join('');
+    const gainers = [...data].sort((a,b) => parseFloat(gv(b,['priceChangePercent24h','change24h','changePercent'],0)) - parseFloat(gv(a,['priceChangePercent24h','change24h','changePercent'],0))).slice(0, 5);
+    document.getElementById('mcGainers').innerHTML = gainers.map((c, i) => '<div class="flex items-center justify-between p-3 rounded-xl enter" style="background: var(--bg-elevated); border: 1px solid var(--border); animation-delay:' + (i*0.05) + 's;"><div class="flex items-center gap-2"><span class="text-[#4a5568] mono text-xs w-5">' + (i+1) + '</span><span class="font-medium text-sm">' + gv(c,['symbol','s','sym'], '?') + '</span></div>' + badge(gv(c,['priceChangePercent24h','change24h','changePercent'],0), 'change') + '</div>').join('');
   } catch (e) { console.error('Marketcap error:', e); document.getElementById('mcTableBody').innerHTML = '<tr><td colspan="6" class="p-8 text-center text-[#ff4757]">Error: ' + e.message + '</td></tr>'; }
 }
 
+// === Futures ===
 async function loadFutures() {
   try {
     const res = await fetch('/api/futures-stats');
@@ -789,6 +839,7 @@ async function loadFutures() {
   } catch (e) { console.error('Futures error:', e); document.getElementById('futuresContent').innerHTML = '<div class="error-state"><div class="text-sm font-medium">Futures data unavailable</div><div class="text-xs opacity-60">' + e.message + '</div></div>'; }
 }
 
+// === ETF ===
 async function loadEtf() {
   try {
     const res = await fetch('/api/etf');
@@ -802,7 +853,7 @@ async function loadEtf() {
       if (charts.etf) charts.etf.destroy();
       charts.etf = new Chart(ctx1, {
         type: 'doughnut',
-        data: { labels: etfList.slice(0, 6).map(d => d.name || d.ticker || 'ETF'), datasets: [{ data: etfList.slice(0, 6).map(d => parseFloat(d.flow || d.dailyFlow || d.value || 0)), backgroundColor: ['rgba(0,229,192,0.7)', 'rgba(55,66,250,0.7)', 'rgba(255,71,87,0.7)', 'rgba(46,213,115,0.7)', 'rgba(255,165,2,0.7)', 'rgba(139,149,168,0.5)'], borderColor: ['#00e5c0', '#3742fa', '#ff4757', '#2ed573', '#ffa502', '#8b95a8'], borderWidth: 2 }] },
+        data: { labels: etfList.slice(0, 6).map(d => gv(d,['name','ticker','etfName'], 'ETF')), datasets: [{ data: etfList.slice(0, 6).map(d => parseFloat(gv(d,['flow','dailyFlow','value','changeUsd'], 0))), backgroundColor: ['rgba(0,229,192,0.7)', 'rgba(55,66,250,0.7)', 'rgba(255,71,87,0.7)', 'rgba(46,213,115,0.7)', 'rgba(255,165,2,0.7)', 'rgba(139,149,168,0.5)'], borderColor: ['#00e5c0', '#3742fa', '#ff4757', '#2ed573', '#ffa502', '#8b95a8'], borderWidth: 2 }] },
         options: { responsive: true, maintainAspectRatio: false, cutout: '60%', plugins: { legend: { position: 'right', labels: { color: '#8b95a8', font: { size: 10 } } } } }
       });
     }
@@ -810,7 +861,7 @@ async function loadEtf() {
     if (charts.etfTrend) charts.etfTrend.destroy();
     charts.etfTrend = new Chart(ctx2, {
       type: 'line',
-      data: { labels: etfList.slice(0, 10).map((d,i) => d.date || d.day || ('Day ' + (i+1))), datasets: [{ label: 'Flow ($M)', data: etfList.slice(0, 10).map(d => parseFloat(d.flow || d.dailyFlow || d.value || 0) / 1e6), borderColor: '#00e5c0', backgroundColor: 'rgba(0,229,192,0.1)', fill: true, tension: 0.4, pointRadius: 3 }] },
+      data: { labels: etfList.slice(0, 10).map((d,i) => gv(d,['date','day','time'], 'Day ' + (i+1))), datasets: [{ label: 'Flow ($M)', data: etfList.slice(0, 10).map(d => parseFloat(gv(d,['flow','dailyFlow','value','changeUsd'], 0)) / 1e6), borderColor: '#00e5c0', backgroundColor: 'rgba(0,229,192,0.1)', fill: true, tension: 0.4, pointRadius: 3 }] },
       options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { grid: { color: 'rgba(30,39,64,0.4)' }, ticks: { color: '#4a5568' } }, x: { grid: { display: false }, ticks: { color: '#4a5568', font: { size: 10 } } } } }
     });
   } catch (e) { console.error('ETF error:', e); document.getElementById('etfContent').innerHTML = '<div class="error-state"><div class="text-sm font-medium">ETF data unavailable</div><div class="text-xs opacity-60">' + e.message + '</div></div>'; }
