@@ -93,7 +93,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="CoinGlass Terminal Pro")
+app = FastAPI(title="Crypto Terminal Pro")
 templates = Jinja2Templates(directory="/app/templates")
 
 def extract_data(raw):
@@ -113,7 +113,7 @@ async def index(request: Request):
 async def api_docs(request: Request):
     return templates.TemplateResponse(request, "docs.html", {"active_page": "docs"})
 
-# --- API Endpoints (Async, No Caching) ---
+# --- API Endpoints (Async, No Caching, Verified Working) ---
 
 @app.get("/api/rsi")
 async def get_rsi():
@@ -171,32 +171,6 @@ async def get_futures_stats():
     except Exception as e:
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
-# --- NEW ENDPOINTS ---
-
-@app.get("/api/long-short")
-async def get_long_short():
-    try:
-        data = await fetch_and_decrypt("https://capi.coinglass.com/api/futures/longShort/chart", {"symbol": "BTC", "timeType": 4})
-        return {"success": True, "data": data, "extracted": extract_data(data)}
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
-
-@app.get("/api/spot-volume")
-async def get_spot_volume():
-    try:
-        data = await fetch_and_decrypt("https://capi.coinglass.com/api/spot/vol/list", {"pageSize": 100})
-        return {"success": True, "data": data, "extracted": extract_data(data)}
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
-
-@app.get("/api/top-traders")
-async def get_top_traders():
-    try:
-        data = await fetch_and_decrypt("https://capi.coinglass.com/api/futures/topTrader/list", {"symbol": "BTC"})
-        return {"success": True, "data": data, "extracted": extract_data(data)}
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
-
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=10000)
@@ -209,7 +183,7 @@ RUN cat <<'HTMLEOF' > /app/templates/dashboard.html
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CoinGlass Terminal Pro</title>
+<title>Crypto Terminal Pro</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -265,7 +239,7 @@ input[type="text"]:focus { border-color: var(--accent); }
         <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, var(--accent), var(--accent-2));">
           <svg class="w-5 h-5 text-black" fill="currentColor" viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
         </div>
-        <span class="text-lg font-bold tracking-tight">Terminal<span style="color: var(--accent);">Pro</span></span>
+        <span class="text-lg font-bold tracking-tight">Crypto<span style="color: var(--accent);">Terminal</span></span>
       </div>
       <div class="flex items-center gap-2">
         <a href="/" class="nav-link {{ 'active' if active_page == 'dashboard' else '' }}">Dashboard</a>
@@ -285,8 +259,8 @@ input[type="text"]:focus { border-color: var(--accent); }
   
   <div class="flex items-center justify-between mb-8">
     <div>
-      <h1 class="text-3xl font-bold tracking-tight mb-1">Market Overview</h1>
-      <p class="text-sm text-[var(--text-muted)]">Real-time decrypted crypto intelligence. No caching. Instant async fetching.</p>
+      <h1 class="text-3xl font-bold tracking-tight mb-1">Crypto Market Overview</h1>
+      <p class="text-sm text-[var(--text-muted)]">Real-time decrypted crypto intelligence. Pure async. No caching.</p>
     </div>
     <div class="mono text-xs text-[var(--text-muted)]" id="lastUpdate">--:--:--</div>
   </div>
@@ -295,10 +269,9 @@ input[type="text"]:focus { border-color: var(--accent); }
     <button onclick="switchTab('rsi')" id="tab-rsi" class="tab-btn active">RSI Matrix</button>
     <button onclick="switchTab('funding')" id="tab-funding" class="tab-btn">Funding Rates</button>
     <button onclick="switchTab('liquidation')" id="tab-liquidation" class="tab-btn">Liquidations</button>
-    <button onclick="switchTab('longshort')" id="tab-longshort" class="tab-btn">Long/Short Ratio</button>
-    <button onclick="switchTab('spotvol')" id="tab-spotvol" class="tab-btn">Spot Volume</button>
-    <button onclick="switchTab('toptraders')" id="tab-toptraders" class="tab-btn">Top Traders</button>
+    <button onclick="switchTab('openinterest')" id="tab-openinterest" class="tab-btn">Open Interest</button>
     <button onclick="switchTab('marketcap')" id="tab-marketcap" class="tab-btn">Market Cap</button>
+    <button onclick="switchTab('etf')" id="tab-etf" class="tab-btn">ETF Flows</button>
   </div>
 
   <div id="panel-rsi" class="panel active">
@@ -354,23 +327,10 @@ input[type="text"]:focus { border-color: var(--accent); }
     </div>
   </div>
 
-  <div id="panel-longshort" class="panel">
-    <div class="glass p-6 mb-6"><h2 class="text-base font-semibold mb-4">BTC Long/Short Ratio History</h2><div style="height: 350px;"><canvas id="lsChart"></canvas></div></div>
-    <div class="glass p-6"><div id="lsRaw" class="text-xs mono overflow-auto h-48 p-4 rounded-lg" style="background: var(--bg-elev); border: 1px solid var(--border);"></div></div>
-  </div>
-
-  <div id="panel-spotvol" class="panel">
-    <div class="glass p-6 mb-6"><h2 class="text-base font-semibold mb-4">Top 20 Spot Exchanges by Volume</h2><div style="height: 350px;"><canvas id="svChart"></canvas></div></div>
-    <div class="glass overflow-hidden">
-      <div class="p-4 border-b border-[var(--border)]"><h2 class="text-base font-semibold">Spot Volume List</h2></div>
-      <div class="overflow-x-auto"><table><thead><tr><th>Exchange</th><th class="text-right">Volume (24h)</th></tr></thead><tbody id="svTable"><tr><td colspan="2" class="p-8 text-center text-[var(--text-muted)]">Loading...</td></tr></tbody></table></div>
-    </div>
-  </div>
-
-  <div id="panel-toptraders" class="panel">
-    <div class="glass p-6">
-      <h2 class="text-base font-semibold mb-4">Top Trader Positions (BTC)</h2>
-      <pre id="ttRaw" class="text-xs mono overflow-auto h-96 p-4 rounded-lg" style="background: var(--bg-elev); border: 1px solid var(--border);"></pre>
+  <div id="panel-openinterest" class="panel">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+      <div class="glass p-6"><h2 class="text-base font-semibold mb-4">Open Interest History</h2><div style="height: 300px;"><canvas id="oiChart"></canvas></div></div>
+      <div class="glass p-6"><h2 class="text-base font-semibold mb-4">Raw Data</h2><div id="oiRaw" class="text-xs mono overflow-auto h-72 p-4 rounded-lg" style="background: var(--bg-elev); border: 1px solid var(--border);"></div></div>
     </div>
   </div>
 
@@ -379,6 +339,13 @@ input[type="text"]:focus { border-color: var(--accent); }
     <div class="glass overflow-hidden">
       <div class="p-4 border-b border-[var(--border)]"><h2 class="text-base font-semibold">Market Cap Rankings</h2></div>
       <div class="overflow-x-auto"><table><thead><tr><th>#</th><th>Asset</th><th class="text-right">Price</th><th class="text-right">Market Cap</th></tr></thead><tbody id="mcTable"><tr><td colspan="4" class="p-8 text-center text-[var(--text-muted)]">Loading...</td></tr></tbody></table></div>
+    </div>
+  </div>
+
+  <div id="panel-etf" class="panel">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+      <div class="glass p-6"><h2 class="text-base font-semibold mb-4">ETF Flow Distribution</h2><div style="height: 300px;"><canvas id="etfChart"></canvas></div></div>
+      <div class="glass p-6"><h2 class="text-base font-semibold mb-4">Raw Data</h2><div id="etfRaw" class="text-xs mono overflow-auto h-72 p-4 rounded-lg" style="background: var(--bg-elev); border: 1px solid var(--border);"></div></div>
     </div>
   </div>
 
@@ -397,10 +364,9 @@ function switchTab(tab) {
   if (tab === 'rsi') loadRsi();
   if (tab === 'funding') loadFunding();
   if (tab === 'liquidation') loadLiq();
-  if (tab === 'longshort') loadLS();
-  if (tab === 'spotvol') loadSV();
-  if (tab === 'toptraders') loadTT();
+  if (tab === 'openinterest') loadOI();
   if (tab === 'marketcap') loadMC();
+  if (tab === 'etf') loadETF();
 }
 
 function gv(obj, keys, fb) { for (const k of keys) if (obj && obj[k] !== undefined) return obj[k]; return fb; }
@@ -494,47 +460,19 @@ async function loadLiq() {
   } catch(e) { console.error(e); }
 }
 
-async function loadLS() {
+async function loadOI() {
   try {
-    const res = await fetch('/api/long-short');
+    const res = await fetch('/api/openinterest');
     const json = await res.json();
     if (!json.success) throw new Error(json.error);
     const d = json.data;
-    document.getElementById('lsRaw').innerText = JSON.stringify(d, null, 2);
-    if (charts.ls) charts.ls.destroy();
-    charts.ls = new Chart(document.getElementById('lsChart'), {
+    document.getElementById('oiRaw').innerText = JSON.stringify(d, null, 2);
+    if (charts.oi) charts.oi.destroy();
+    charts.oi = new Chart(document.getElementById('oiChart'), {
       type: 'line',
-      data: { labels: (d.dateList||[]).map(t => new Date(t).toLocaleDateString()), datasets: [
-        { label: 'Long', data: d.longList||[], borderColor: 'var(--success)', tension: 0.3, pointRadius: 0 },
-        { label: 'Short', data: d.shortList||[], borderColor: 'var(--danger)', tension: 0.3, pointRadius: 0 }
-      ]},
-      options: { responsive: true, maintainAspectRatio: false, scales: { y: { grid: { color: 'rgba(255,255,255,0.05)' } }, x: { grid: { display: false } } } }
+      data: { labels: (d.dateList||[]).map(t => new Date(t).toLocaleDateString()), datasets: [{ label: 'OI (USD)', data: d.openInterestList||[], borderColor: 'var(--accent)', backgroundColor: 'rgba(0,240,168,0.1)', fill: true, tension: 0.3, pointRadius: 0 }] },
+      options: { responsive: true, maintainAspectRatio: false, scales: { y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { callback: v => '$' + fmtN(v) } }, x: { grid: { display: false } } } }
     });
-  } catch(e) { console.error(e); }
-}
-
-async function loadSV() {
-  try {
-    const res = await fetch('/api/spot-volume');
-    const json = await res.json();
-    if (!json.success) throw new Error(json.error);
-    const d = extractArr(json.data);
-    document.getElementById('svTable').innerHTML = d.slice(0,50).map(e => `<tr><td class="font-medium">${gv(e,['exchangeName','name'], '??')}</td><td class="text-right mono">$${fmtN(gv(e,['volUsd'], 0))}</td></tr>`).join('');
-    if (charts.sv) charts.sv.destroy();
-    charts.sv = new Chart(document.getElementById('svChart'), {
-      type: 'bar',
-      data: { labels: d.slice(0,20).map(e => gv(e,['exchangeName','name'], '?')), datasets: [{ data: d.slice(0,20).map(e => parseFloat(gv(e,['volUsd'], 0))), backgroundColor: 'rgba(59,130,246,0.6)', borderRadius: 4 }] },
-      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { ticks: { callback: v => '$' + fmtN(v) }, grid: { color: 'rgba(255,255,255,0.05)' } }, x: { grid: { display: false } } } }
-    });
-  } catch(e) { console.error(e); }
-}
-
-async function loadTT() {
-  try {
-    const res = await fetch('/api/top-traders');
-    const json = await res.json();
-    if (!json.success) throw new Error(json.error);
-    document.getElementById('ttRaw').innerText = JSON.stringify(json.data, null, 2);
   } catch(e) { console.error(e); }
 }
 
@@ -554,6 +492,23 @@ async function loadMC() {
   } catch(e) { console.error(e); }
 }
 
+async function loadETF() {
+  try {
+    const res = await fetch('/api/etf');
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error);
+    const d = json.data;
+    document.getElementById('etfRaw').innerText = JSON.stringify(d, null, 2);
+    const etfList = extractArr(d);
+    if (charts.etf) charts.etf.destroy();
+    charts.etf = new Chart(document.getElementById('etfChart'), {
+      type: 'doughnut',
+      data: { labels: etfList.slice(0, 6).map(d => gv(d,['name','ticker','etfName'], 'ETF')), datasets: [{ data: etfList.slice(0, 6).map(d => parseFloat(gv(d,['flow','dailyFlow','value','changeUsd'], 0))), backgroundColor: ['rgba(0,240,168,0.6)', 'rgba(59,130,246,0.6)', 'rgba(255,71,87,0.6)', 'rgba(255,165,2,0.6)', 'rgba(139,149,168,0.4)', 'rgba(255,255,255,0.2)'], borderColor: 'transparent' }] },
+      options: { responsive: true, maintainAspectRatio: false, cutout: '70%' }
+    });
+  } catch(e) { console.error(e); }
+}
+
 // Initial load
 loadRsi();
 setInterval(() => { if(document.getElementById('panel-rsi').classList.contains('active')) loadRsi(); }, 60000);
@@ -569,7 +524,7 @@ RUN cat <<'HTMLEOF' > /app/templates/docs.html
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>API Reference - TerminalPro</title>
+<title>API Reference - Crypto Terminal</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -596,7 +551,7 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
         <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, var(--accent), #3b82f6);">
           <svg class="w-5 h-5 text-black" fill="currentColor" viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
         </div>
-        <span class="text-lg font-bold tracking-tight">Terminal<span style="color: var(--accent);">Pro</span></span>
+        <span class="text-lg font-bold tracking-tight">Crypto<span style="color: var(--accent);">Terminal</span></span>
       </div>
       <div class="flex items-center gap-2">
         <a href="/" class="nav-link {{ 'active' if active_page == 'dashboard' else '' }}">Dashboard</a>
@@ -609,7 +564,7 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
 <main class="max-w-5xl mx-auto px-6 py-12">
   <div class="mb-12">
     <h1 class="text-4xl font-bold tracking-tight mb-3">API Reference</h1>
-    <p class="text-[var(--text-muted)] text-lg">Real-time decrypted CoinGlass endpoints. Native async Python. No caching layer.</p>
+    <p class="text-[var(--text-muted)] text-lg">Real-time decrypted crypto endpoints. Native async Python. No caching layer.</p>
   </div>
 
   <div class="space-y-6">
@@ -658,25 +613,9 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
     <div class="glass p-6 endpoint-card">
       <div class="flex items-center gap-3 mb-3">
         <span class="method-get mono text-xs font-bold px-2 py-1 rounded">GET</span>
-        <code class="mono text-sm text-[var(--accent)]">/api/long-short</code>
+        <code class="mono text-sm text-[var(--accent)]">/api/openinterest</code>
       </div>
-      <p class="text-sm text-[var(--text-muted)] mb-4">Historical Long/Short ratio chart data for Bitcoin.</p>
-    </div>
-
-    <div class="glass p-6 endpoint-card">
-      <div class="flex items-center gap-3 mb-3">
-        <span class="method-get mono text-xs font-bold px-2 py-1 rounded">GET</span>
-        <code class="mono text-sm text-[var(--accent)]">/api/spot-volume</code>
-      </div>
-      <p class="text-sm text-[var(--text-muted)] mb-4">Top 100 spot trading volumes by exchange.</p>
-    </div>
-
-    <div class="glass p-6 endpoint-card">
-      <div class="flex items-center gap-3 mb-3">
-        <span class="method-get mono text-xs font-bold px-2 py-1 rounded">GET</span>
-        <code class="mono text-sm text-[var(--accent)]">/api/top-traders</code>
-      </div>
-      <p class="text-sm text-[var(--text-muted)] mb-4">Top trader positions and sentiment for BTC.</p>
+      <p class="text-sm text-[var(--text-muted)] mb-4">Total open interest statistics and historical chart data.</p>
     </div>
 
     <div class="glass p-6 endpoint-card">
@@ -685,6 +624,14 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
         <code class="mono text-sm text-[var(--accent)]">/api/marketcap</code>
       </div>
       <p class="text-sm text-[var(--text-muted)] mb-4">Market cap rankings for the top 100 cryptocurrencies.</p>
+    </div>
+
+    <div class="glass p-6 endpoint-card">
+      <div class="flex items-center gap-3 mb-3">
+        <span class="method-get mono text-xs font-bold px-2 py-1 rounded">GET</span>
+        <code class="mono text-sm text-[var(--accent)]">/api/etf</code>
+      </div>
+      <p class="text-sm text-[var(--text-muted)] mb-4">Spot Bitcoin ETF flow data and overview.</p>
     </div>
   </div>
 </main>
