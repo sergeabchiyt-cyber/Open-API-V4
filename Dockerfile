@@ -1,6 +1,5 @@
 FROM python:3.11-slim
 
-# Use BuildKit for heredocs
 # syntax=docker/dockerfile:1.4
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -8,7 +7,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Switch to httpx for native async speed (no thread pool blocking)
 RUN pip install --no-cache-dir fastapi uvicorn[standard] httpx pycryptodome jinja2
 
 RUN mkdir -p /app/templates
@@ -99,11 +97,18 @@ templates = Jinja2Templates(directory="/app/templates")
 def extract_data(raw):
     if isinstance(raw, list): return raw
     if isinstance(raw, dict):
-        for key in ["list", "data", "topInflowList", "inflowList"]:
-            if key in raw:
-                d = raw[key]
-                return d if isinstance(d, list) else [d]
-    return raw if isinstance(raw, list) else []
+        for key in ["list", "topInflowList", "inflowList", "rankList", "coins"]:
+            if key in raw and isinstance(raw[key], list):
+                return raw[key]
+        # Dig deeper if it's a nested dict
+        if "data" in raw:
+            d = raw["data"]
+            if isinstance(d, list): return d
+            if isinstance(d, dict):
+                for key in ["list", "topInflowList", "inflowList", "rankList", "coins"]:
+                    if key in d and isinstance(d[key], list):
+                        return d[key]
+    return []
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
@@ -112,8 +117,6 @@ async def index(request: Request):
 @app.get("/api-docs", response_class=HTMLResponse)
 async def api_docs(request: Request):
     return templates.TemplateResponse(request, "docs.html", {"active_page": "docs"})
-
-# --- API Endpoints (Async, No Caching, Verified Working) ---
 
 @app.get("/api/rsi")
 async def get_rsi():
@@ -163,14 +166,6 @@ async def get_marketcap():
     except Exception as e:
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
-@app.get("/api/futures-stats")
-async def get_futures_stats():
-    try:
-        data = await fetch_and_decrypt("https://capi.coinglass.com/api/futures/home/statistics", {})
-        return {"success": True, "data": data, "extracted": extract_data(data)}
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
-
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=10000)
@@ -212,8 +207,8 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
 .tab-btn:hover { color: var(--text); background: rgba(255,255,255,0.03); }
 .tab-btn.active { color: var(--accent); background: rgba(0,240,168,0.08); border-color: rgba(0,240,168,0.2); }
 table { width: 100%; border-collapse: collapse; }
-th { text-align: left; padding: 14px 16px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); border-bottom: 1px solid var(--border); }
-td { padding: 14px 16px; font-size: 13px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+th { text-align: left; padding: 14px 16px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg-elev); }
+td { padding: 12px 16px; font-size: 13px; border-bottom: 1px solid rgba(255,255,255,0.04); }
 tr:hover td { background: rgba(255,255,255,0.02); }
 .badge { padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; font-family: 'JetBrains Mono', monospace; display: inline-block; }
 .badge-red { background: rgba(255,71,87,0.1); color: var(--danger); }
@@ -227,12 +222,15 @@ input[type="text"]:focus { border-color: var(--accent); }
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
+.debug-pre { background: #05070d; border: 1px solid var(--border); border-radius: 8px; padding: 16px; font-size: 11px; color: #8b95a8; max-height: 400px; overflow: auto; }
+.collapse-btn { cursor: pointer; transition: transform 0.2s; }
+.collapse-btn.open { transform: rotate(180deg); }
 </style>
 </head>
 <body>
 <div class="mesh-bg"></div>
 
-<nav class="sticky top-0 z-50 border-b border-[var(--border)]" style="background: rgba(5,7,13,0.7); backdrop-filter: blur(20px);">
+<nav class="sticky top-0 z-50 border-b border-[var(--border)]" style="background: rgba(5,7,13,0.85); backdrop-filter: blur(20px);">
   <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
     <div class="flex items-center gap-8">
       <div class="flex items-center gap-2.5">
@@ -270,18 +268,19 @@ input[type="text"]:focus { border-color: var(--accent); }
     <button onclick="switchTab('funding')" id="tab-funding" class="tab-btn">Funding Rates</button>
     <button onclick="switchTab('liquidation')" id="tab-liquidation" class="tab-btn">Liquidations</button>
     <button onclick="switchTab('openinterest')" id="tab-openinterest" class="tab-btn">Open Interest</button>
-    <button onclick="switchTab('marketcap')" id="tab-marketcap" class="tab-btn">Market Cap</button>
     <button onclick="switchTab('etf')" id="tab-etf" class="tab-btn">ETF Flows</button>
+    <button onclick="switchTab('marketcap')" id="tab-marketcap" class="tab-btn">Market Cap</button>
   </div>
 
+  <!-- RSI Tab -->
   <div id="panel-rsi" class="panel active">
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
       <div class="glass p-6 lg:col-span-2">
         <div class="flex items-center justify-between mb-4">
-          <h2 class="text-base font-semibold">RSI 4h Extremes</h2>
+          <h2 class="text-base font-semibold">RSI 4h Extremes (Top 15 Overbought / Oversold)</h2>
           <input type="text" id="rsiSearch" placeholder="Search asset..." class="w-48" oninput="filterRsi()">
         </div>
-        <div style="height: 320px;"><canvas id="rsiChart"></canvas></div>
+        <div style="height: 360px;"><canvas id="rsiChart"></canvas></div>
       </div>
       <div class="glass p-6">
         <h2 class="text-base font-semibold mb-4">Market Stats</h2>
@@ -290,62 +289,122 @@ input[type="text"]:focus { border-color: var(--accent); }
         </div>
       </div>
     </div>
-    <div class="glass overflow-hidden">
+    <div class="glass overflow-hidden mb-6">
       <div class="p-4 border-b border-[var(--border)] flex justify-between items-center">
         <h2 class="text-base font-semibold">All Assets</h2>
         <span class="mono text-xs text-[var(--text-muted)]" id="rsiCount">0 assets</span>
       </div>
-      <div class="overflow-x-auto">
+      <div class="overflow-x-auto" style="max-height: 400px;">
         <table>
           <thead><tr><th>#</th><th>Asset</th><th class="text-right">Price</th><th class="text-right">RSI 1h</th><th class="text-right">RSI 4h</th><th class="text-right">RSI 24h</th></tr></thead>
           <tbody id="rsiTable"><tr><td colspan="6" class="p-8 text-center text-[var(--text-muted)]">Loading...</td></tr></tbody>
         </table>
       </div>
     </div>
+    <div class="glass p-4">
+      <div class="flex items-center gap-3 cursor-pointer" onclick="toggleDebug('rsiDebug')">
+        <svg class="w-4 h-4 collapse-btn open" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        <span class="text-sm font-semibold">Raw JSON Network Response</span>
+      </div>
+      <pre id="rsiDebug" class="debug-pre mt-4"></pre>
+    </div>
   </div>
 
+  <!-- Funding Tab -->
   <div id="panel-funding" class="panel">
     <div class="glass p-6 mb-6">
       <h2 class="text-base font-semibold mb-4">Funding Rate Extremes (Top 50)</h2>
-      <div style="height: 300px;"><canvas id="fundingChart"></canvas></div>
+      <div style="height: 360px;"><canvas id="fundingChart"></canvas></div>
     </div>
-    <div class="glass overflow-hidden">
+    <div class="glass overflow-hidden mb-6">
       <div class="p-4 border-b border-[var(--border)]"><h2 class="text-base font-semibold">All Funding Rates</h2></div>
-      <div class="overflow-x-auto">
+      <div class="overflow-x-auto" style="max-height: 400px;">
         <table>
           <thead><tr><th>Exchange</th><th>Asset</th><th class="text-right">Rate</th><th class="text-right">Next Funding</th></tr></thead>
           <tbody id="fundingTable"><tr><td colspan="4" class="p-8 text-center text-[var(--text-muted)]">Loading...</td></tr></tbody>
         </table>
       </div>
     </div>
+    <div class="glass p-4">
+      <div class="flex items-center gap-3 cursor-pointer" onclick="toggleDebug('fundingDebug')">
+        <svg class="w-4 h-4 collapse-btn open" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        <span class="text-sm font-semibold">Raw JSON Network Response</span>
+      </div>
+      <pre id="fundingDebug" class="debug-pre mt-4"></pre>
+    </div>
   </div>
 
+  <!-- Liquidation Tab -->
   <div id="panel-liquidation" class="panel">
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-      <div class="glass p-6"><h2 class="text-base font-semibold mb-4">Long vs Short</h2><div style="height: 300px;"><canvas id="liqChart"></canvas></div></div>
-      <div class="glass p-6"><h2 class="text-base font-semibold mb-4">Raw Data</h2><div id="liqRaw" class="text-xs mono overflow-auto h-72 p-4 rounded-lg" style="background: var(--bg-elev); border: 1px solid var(--border);"></div></div>
+      <div class="glass p-6"><h2 class="text-base font-semibold mb-4">Long vs Short</h2><div style="height: 350px;"><canvas id="liqChart"></canvas></div></div>
+      <div class="glass p-6"><h2 class="text-base font-semibold mb-4">Details</h2><div id="liqRaw" class="text-xs mono overflow-auto h-80 p-4 rounded-lg" style="background: var(--bg-elev); border: 1px solid var(--border);"></div></div>
+    </div>
+    <div class="glass p-4">
+      <div class="flex items-center gap-3 cursor-pointer" onclick="toggleDebug('liqDebug')">
+        <svg class="w-4 h-4 collapse-btn open" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        <span class="text-sm font-semibold">Raw JSON Network Response</span>
+      </div>
+      <pre id="liqDebug" class="debug-pre mt-4"></pre>
     </div>
   </div>
 
+  <!-- Open Interest Tab -->
   <div id="panel-openinterest" class="panel">
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-      <div class="glass p-6"><h2 class="text-base font-semibold mb-4">Open Interest History</h2><div style="height: 300px;"><canvas id="oiChart"></canvas></div></div>
-      <div class="glass p-6"><h2 class="text-base font-semibold mb-4">Raw Data</h2><div id="oiRaw" class="text-xs mono overflow-auto h-72 p-4 rounded-lg" style="background: var(--bg-elev); border: 1px solid var(--border);"></div></div>
+      <div class="glass p-6"><h2 class="text-base font-semibold mb-4">Open Interest History</h2><div style="height: 350px;"><canvas id="oiChart"></canvas></div></div>
+      <div class="glass p-6"><h2 class="text-base font-semibold mb-4">Details</h2><div id="oiRaw" class="text-xs mono overflow-auto h-80 p-4 rounded-lg" style="background: var(--bg-elev); border: 1px solid var(--border);"></div></div>
+    </div>
+    <div class="glass p-4">
+      <div class="flex items-center gap-3 cursor-pointer" onclick="toggleDebug('oiDebug')">
+        <svg class="w-4 h-4 collapse-btn open" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        <span class="text-sm font-semibold">Raw JSON Network Response</span>
+      </div>
+      <pre id="oiDebug" class="debug-pre mt-4"></pre>
     </div>
   </div>
 
-  <div id="panel-marketcap" class="panel">
-    <div class="glass p-6 mb-6"><h2 class="text-base font-semibold mb-4">Market Cap vs Volume (Top 20)</h2><div style="height: 350px;"><canvas id="mcChart"></canvas></div></div>
-    <div class="glass overflow-hidden">
-      <div class="p-4 border-b border-[var(--border)]"><h2 class="text-base font-semibold">Market Cap Rankings</h2></div>
-      <div class="overflow-x-auto"><table><thead><tr><th>#</th><th>Asset</th><th class="text-right">Price</th><th class="text-right">Market Cap</th></tr></thead><tbody id="mcTable"><tr><td colspan="4" class="p-8 text-center text-[var(--text-muted)]">Loading...</td></tr></tbody></table></div>
-    </div>
-  </div>
-
+  <!-- ETF Tab -->
   <div id="panel-etf" class="panel">
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-      <div class="glass p-6"><h2 class="text-base font-semibold mb-4">ETF Flow Distribution</h2><div style="height: 300px;"><canvas id="etfChart"></canvas></div></div>
-      <div class="glass p-6"><h2 class="text-base font-semibold mb-4">Raw Data</h2><div id="etfRaw" class="text-xs mono overflow-auto h-72 p-4 rounded-lg" style="background: var(--bg-elev); border: 1px solid var(--border);"></div></div>
+      <div class="glass p-6"><h2 class="text-base font-semibold mb-4">ETF Inflow/Outflow Distribution</h2><div style="height: 350px;"><canvas id="etfChart"></canvas></div></div>
+      <div class="glass overflow-hidden">
+        <div class="p-4 border-b border-[var(--border)]"><h2 class="text-base font-semibold">ETF Details</h2></div>
+        <div class="overflow-x-auto" style="max-height: 350px;">
+          <table>
+            <thead><tr><th>Logo</th><th>Ticker</th><th>Coin</th><th class="text-right">Change (USD)</th></tr></thead>
+            <tbody id="etfTable"><tr><td colspan="4" class="p-8 text-center text-[var(--text-muted)]">Loading...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="glass p-4">
+      <div class="flex items-center gap-3 cursor-pointer" onclick="toggleDebug('etfDebug')">
+        <svg class="w-4 h-4 collapse-btn open" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        <span class="text-sm font-semibold">Raw JSON Network Response</span>
+      </div>
+      <pre id="etfDebug" class="debug-pre mt-4"></pre>
+    </div>
+  </div>
+
+  <!-- Market Cap Tab -->
+  <div id="panel-marketcap" class="panel">
+    <div class="glass p-6 mb-6"><h2 class="text-base font-semibold mb-4">Market Cap vs Volume (Top 20)</h2><div style="height: 350px;"><canvas id="mcChart"></canvas></div></div>
+    <div class="glass overflow-hidden mb-6">
+      <div class="p-4 border-b border-[var(--border)]"><h2 class="text-base font-semibold">Market Cap Rankings</h2></div>
+      <div class="overflow-x-auto" style="max-height: 400px;">
+        <table>
+          <thead><tr><th>#</th><th>Asset</th><th class="text-right">Price</th><th class="text-right">Market Cap</th><th class="text-right">24h Vol</th></tr></thead>
+          <tbody id="mcTable"><tr><td colspan="5" class="p-8 text-center text-[var(--text-muted)]">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="glass p-4">
+      <div class="flex items-center gap-3 cursor-pointer" onclick="toggleDebug('mcDebug')">
+        <svg class="w-4 h-4 collapse-btn open" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        <span class="text-sm font-semibold">Raw JSON Network Response</span>
+      </div>
+      <pre id="mcDebug" class="debug-pre mt-4"></pre>
     </div>
   </div>
 
@@ -354,6 +413,18 @@ input[type="text"]:focus { border-color: var(--accent); }
 <script>
 const charts = {};
 let allRsi = [];
+
+function toggleDebug(id) {
+  const el = document.getElementById(id);
+  const btn = el.previousElementSibling.querySelector('.collapse-btn');
+  if (el.style.display === 'none' || el.style.display === '') {
+    el.style.display = 'block';
+    btn.classList.add('open');
+  } else {
+    el.style.display = 'none';
+    btn.classList.remove('open');
+  }
+}
 
 function switchTab(tab) {
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
@@ -365,26 +436,28 @@ function switchTab(tab) {
   if (tab === 'funding') loadFunding();
   if (tab === 'liquidation') loadLiq();
   if (tab === 'openinterest') loadOI();
-  if (tab === 'marketcap') loadMC();
   if (tab === 'etf') loadETF();
+  if (tab === 'marketcap') loadMC();
 }
 
 function gv(obj, keys, fb) { for (const k of keys) if (obj && obj[k] !== undefined) return obj[k]; return fb; }
 function fmtP(p) { p = parseFloat(p); if (isNaN(p)) return '--'; if (p >= 1000) return '$' + p.toLocaleString('en', {maximumFractionDigits: 2}); if (p >= 1) return '$' + p.toFixed(2); return '$' + p.toFixed(6); }
 function fmtN(n) { n = parseFloat(n); if (isNaN(n)) return '--'; if (n >= 1e12) return (n/1e12).toFixed(2) + 'T'; if (n >= 1e9) return (n/1e9).toFixed(2) + 'B'; if (n >= 1e6) return (n/1e6).toFixed(2) + 'M'; if (n >= 1e3) return (n/1e3).toFixed(2) + 'K'; return n.toFixed(2); }
 function badge(v, t) { v = parseFloat(v); if (isNaN(v)) return '<span class="badge badge-neutral">--</span>'; if (t==='rsi') return v >= 70 ? `<span class="badge badge-red">${v.toFixed(1)}</span>` : v <= 30 ? `<span class="badge badge-green">${v.toFixed(1)}</span>` : `<span class="badge badge-neutral">${v.toFixed(1)}</span>`; if (t==='ch') return v > 0 ? `<span class="badge badge-green">+${v.toFixed(2)}%</span>` : `<span class="badge badge-red">${v.toFixed(2)}%</span>`; if (t==='fr') return v > 0 ? `<span class="badge badge-red">${(v*100).toFixed(4)}%</span>` : `<span class="badge badge-green">${(v*100).toFixed(4)}%</span>`; }
-function extractArr(d) { if (Array.isArray(d)) return d; if (d && d.list) return d.list; if (d && d.data && Array.isArray(d.data)) return d.data; return []; }
+function extractArr(d) { if (Array.isArray(d)) return d; if (d && d.list) return d.list; if (d && d.topInflowList) return d.topInflowList; if (d && d.data && Array.isArray(d.data)) return d.data; return []; }
 
 async function loadRsi() {
   try {
     const res = await fetch('/api/rsi');
     const json = await res.json();
     if (!json.success) throw new Error(json.error);
+    
+    document.getElementById('rsiDebug').innerText = JSON.stringify(json.data, null, 2);
     allRsi = extractArr(json.data);
     document.getElementById('rsiCount').innerText = allRsi.length + ' assets';
     
-    const high = allRsi.filter(c => parseFloat(gv(c, ['rsi4h','rsi_4h'], 0)) >= 70).slice(0, 10);
-    const low = allRsi.filter(c => parseFloat(gv(c, ['rsi4h','rsi_4h'], 0)) <= 30).slice(0, 10);
+    const high = allRsi.filter(c => parseFloat(gv(c, ['rsi4h','rsi_4h'], 0)) >= 70).slice(0, 15);
+    const low = allRsi.filter(c => parseFloat(gv(c, ['rsi4h','rsi_4h'], 0)) <= 30).slice(0, 15);
     
     document.getElementById('rsiStats').innerHTML = `
       <div class="p-4 rounded-xl border border-[var(--border)] flex justify-between items-center"><span class="text-sm text-[var(--text-muted)]">Overbought (>=70)</span><span class="mono text-lg" style="color: var(--danger);">${high.length}</span></div>
@@ -406,7 +479,7 @@ async function loadRsi() {
           borderRadius: 6
         }]
       },
-      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { max: 100, min: 0, grid: { color: 'rgba(255,255,255,0.05)' } }, x: { grid: { display: false } } } }
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { max: 100, min: 0, grid: { color: 'rgba(255,255,255,0.05)' } }, x: { grid: { display: false }, ticks: { font: { size: 10 } } } } }
     });
     
     document.getElementById('lastUpdate').innerText = new Date().toLocaleTimeString();
@@ -426,6 +499,7 @@ async function loadFunding() {
     const res = await fetch('/api/funding');
     const json = await res.json();
     if (!json.success) throw new Error(json.error);
+    document.getElementById('fundingDebug').innerText = JSON.stringify(json.data, null, 2);
     const coins = extractArr(json.data);
     let rows = [];
     coins.forEach(c => { Object.values(c).forEach(v => { if (Array.isArray(v)) v.forEach(e => { if (e && 'fundingRate' in e) rows.push(e); }); }); });
@@ -451,6 +525,7 @@ async function loadLiq() {
     if (!json.success) throw new Error(json.error);
     const d = json.data;
     document.getElementById('liqRaw').innerText = JSON.stringify(d, null, 2);
+    document.getElementById('liqDebug').innerText = JSON.stringify(d, null, 2);
     if (charts.liq) charts.liq.destroy();
     charts.liq = new Chart(document.getElementById('liqChart'), {
       type: 'doughnut',
@@ -467,27 +542,12 @@ async function loadOI() {
     if (!json.success) throw new Error(json.error);
     const d = json.data;
     document.getElementById('oiRaw').innerText = JSON.stringify(d, null, 2);
+    document.getElementById('oiDebug').innerText = JSON.stringify(d, null, 2);
     if (charts.oi) charts.oi.destroy();
     charts.oi = new Chart(document.getElementById('oiChart'), {
       type: 'line',
       data: { labels: (d.dateList||[]).map(t => new Date(t).toLocaleDateString()), datasets: [{ label: 'OI (USD)', data: d.openInterestList||[], borderColor: 'var(--accent)', backgroundColor: 'rgba(0,240,168,0.1)', fill: true, tension: 0.3, pointRadius: 0 }] },
       options: { responsive: true, maintainAspectRatio: false, scales: { y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { callback: v => '$' + fmtN(v) } }, x: { grid: { display: false } } } }
-    });
-  } catch(e) { console.error(e); }
-}
-
-async function loadMC() {
-  try {
-    const res = await fetch('/api/marketcap');
-    const json = await res.json();
-    if (!json.success) throw new Error(json.error);
-    const d = extractArr(json.data);
-    document.getElementById('mcTable').innerHTML = d.slice(0,50).map((c,i) => `<tr><td class="mono text-xs text-[var(--text-muted)]">${i+1}</td><td class="font-medium">${gv(c,['symbol','s'], '??')}</td><td class="text-right mono">${fmtP(gv(c,['price'], 0))}</td><td class="text-right mono">$${fmtN(gv(c,['marketCap'], 0))}</td></tr>`).join('');
-    if (charts.mc) charts.mc.destroy();
-    charts.mc = new Chart(document.getElementById('mcChart'), {
-      type: 'bar',
-      data: { labels: d.slice(0,20).map(c => gv(c,['symbol','s'],'?')), datasets: [{ data: d.slice(0,20).map(c => parseFloat(gv(c,['marketCap'], 0))), backgroundColor: 'rgba(0,240,168,0.6)', borderRadius: 4 }] },
-      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { ticks: { callback: v => '$' + fmtN(v) }, grid: { color: 'rgba(255,255,255,0.05)' } }, x: { grid: { display: false } } } }
     });
   } catch(e) { console.error(e); }
 }
@@ -498,13 +558,44 @@ async function loadETF() {
     const json = await res.json();
     if (!json.success) throw new Error(json.error);
     const d = json.data;
-    document.getElementById('etfRaw').innerText = JSON.stringify(d, null, 2);
+    document.getElementById('etfDebug').innerText = JSON.stringify(d, null, 2);
     const etfList = extractArr(d);
+    
+    document.getElementById('etfTable').innerHTML = etfList.map(e => `
+      <tr>
+        <td><img src="${gv(e, ['coinLogo'], '')}" alt="logo" class="w-6 h-6 rounded-full" onerror="this.style.display='none'"></td>
+        <td class="font-bold mono">${gv(e, ['ticker'], '??')}</td>
+        <td>${gv(e, ['coinName'], '??')} (${gv(e, ['coinSymbol'], '??')})</td>
+        <td class="text-right mono ${parseFloat(gv(e, ['changeUsd'], 0)) > 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'}">${fmtN(gv(e, ['changeUsd'], 0))}</td>
+      </tr>
+    `).join('');
+    
     if (charts.etf) charts.etf.destroy();
     charts.etf = new Chart(document.getElementById('etfChart'), {
-      type: 'doughnut',
-      data: { labels: etfList.slice(0, 6).map(d => gv(d,['name','ticker','etfName'], 'ETF')), datasets: [{ data: etfList.slice(0, 6).map(d => parseFloat(gv(d,['flow','dailyFlow','value','changeUsd'], 0))), backgroundColor: ['rgba(0,240,168,0.6)', 'rgba(59,130,246,0.6)', 'rgba(255,71,87,0.6)', 'rgba(255,165,2,0.6)', 'rgba(139,149,168,0.4)', 'rgba(255,255,255,0.2)'], borderColor: 'transparent' }] },
-      options: { responsive: true, maintainAspectRatio: false, cutout: '70%' }
+      type: 'bar',
+      data: { labels: etfList.slice(0, 10).map(d => gv(d,['ticker'], '?')), datasets: [{ label: 'Change USD', data: etfList.slice(0, 10).map(d => parseFloat(gv(d,['changeUsd'], 0))), backgroundColor: etfList.slice(0, 10).map(d => parseFloat(gv(d,['changeUsd'], 0)) > 0 ? 'rgba(46,213,115,0.6)' : 'rgba(255,71,87,0.6)'), borderRadius: 4 }] },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { ticks: { callback: v => '$' + fmtN(v) }, grid: { color: 'rgba(255,255,255,0.05)' } }, x: { grid: { display: false } } } }
+    });
+  } catch(e) { console.error(e); }
+}
+
+async function loadMC() {
+  try {
+    const res = await fetch('/api/marketcap');
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error);
+    document.getElementById('mcDebug').innerText = JSON.stringify(json.data, null, 2);
+    const d = extractArr(json.data);
+    
+    document.getElementById('mcTable').innerHTML = d.map((c,i) => `
+      <tr><td class="mono text-xs text-[var(--text-muted)]">${i+1}</td><td class="font-medium">${gv(c,['symbol','s'], '??')}</td><td class="text-right mono">${fmtP(gv(c,['price'], 0))}</td><td class="text-right mono">$${fmtN(gv(c,['marketCap'], 0))}</td><td class="text-right mono text-[var(--text-muted)]">$${fmtN(gv(c,['volume24h','vol'], 0))}</td></tr>
+    `).join('');
+    
+    if (charts.mc) charts.mc.destroy();
+    charts.mc = new Chart(document.getElementById('mcChart'), {
+      type: 'bar',
+      data: { labels: d.slice(0,20).map(c => gv(c,['symbol','s'],'?')), datasets: [{ data: d.slice(0,20).map(c => parseFloat(gv(c,['marketCap'], 0))), backgroundColor: 'rgba(0,240,168,0.6)', borderRadius: 4 }] },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { ticks: { callback: v => '$' + fmtN(v) }, grid: { color: 'rgba(255,255,255,0.05)' } }, x: { grid: { display: false } } } }
     });
   } catch(e) { console.error(e); }
 }
@@ -574,13 +665,6 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
         <code class="mono text-sm text-[var(--accent)]">/api/rsi</code>
       </div>
       <p class="text-sm text-[var(--text-muted)] mb-4">Returns RSI (Relative Strength Index) data for 500+ crypto assets across multiple timeframes (1h, 4h, 24h).</p>
-      <pre class="mono text-xs p-4 rounded-lg overflow-auto" style="background: #05070d; border: 1px solid var(--border);">{
-  "success": true,
-  "data": { ... },
-  "extracted": [
-    { "symbol": "BTC", "price": 65000, "rsi1h": 55.2, "rsi4h": 62.1 }
-  ]
-}</pre>
     </div>
 
     <div class="glass p-6 endpoint-card">
@@ -589,13 +673,6 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
         <code class="mono text-sm text-[var(--accent)]">/api/funding</code>
       </div>
       <p class="text-sm text-[var(--text-muted)] mb-4">Perpetual futures funding rates aggregated across all major exchanges.</p>
-      <pre class="mono text-xs p-4 rounded-lg overflow-auto" style="background: #05070d; border: 1px solid var(--border);">{
-  "success": true,
-  "data": { ... },
-  "extracted": [
-    { "symbol": "BTC", "exName": "Binance", "fundingRate": 0.0001 }
-  ]
-}</pre>
     </div>
 
     <div class="glass p-6 endpoint-card">
@@ -604,10 +681,6 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
         <code class="mono text-sm text-[var(--accent)]">/api/liquidation</code>
       </div>
       <p class="text-sm text-[var(--text-muted)] mb-4">24-hour liquidation volumes for BTC, broken down by long and short positions.</p>
-      <pre class="mono text-xs p-4 rounded-lg overflow-auto" style="background: #05070d; border: 1px solid var(--border);">{
-  "success": true,
-  "data": { "longLiquidationUsd": 1200000, "shortLiquidationUsd": 800000 }
-}</pre>
     </div>
 
     <div class="glass p-6 endpoint-card">
@@ -621,17 +694,17 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
     <div class="glass p-6 endpoint-card">
       <div class="flex items-center gap-3 mb-3">
         <span class="method-get mono text-xs font-bold px-2 py-1 rounded">GET</span>
-        <code class="mono text-sm text-[var(--accent)]">/api/marketcap</code>
+        <code class="mono text-sm text-[var(--accent)]">/api/etf</code>
       </div>
-      <p class="text-sm text-[var(--text-muted)] mb-4">Market cap rankings for the top 100 cryptocurrencies.</p>
+      <p class="text-sm text-[var(--text-muted)] mb-4">Spot Bitcoin ETF flow data, including tickers, logos, and USD change.</p>
     </div>
 
     <div class="glass p-6 endpoint-card">
       <div class="flex items-center gap-3 mb-3">
         <span class="method-get mono text-xs font-bold px-2 py-1 rounded">GET</span>
-        <code class="mono text-sm text-[var(--accent)]">/api/etf</code>
+        <code class="mono text-sm text-[var(--accent)]">/api/marketcap</code>
       </div>
-      <p class="text-sm text-[var(--text-muted)] mb-4">Spot Bitcoin ETF flow data and overview.</p>
+      <p class="text-sm text-[var(--text-muted)] mb-4">Market cap rankings for the top 100 cryptocurrencies.</p>
     </div>
   </div>
 </main>
