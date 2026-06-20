@@ -149,7 +149,7 @@ async def get_liquidation():
     try:
         loop = asyncio.get_event_loop()
         data = await loop.run_in_executor(executor, fetch_and_decrypt,
-            "https://capi.coinglass.com/api/futures/liquidation/today", {})
+            "https://capi.coinglass.com/api/futures/liquidation/today", {"symbol": "BTC"})
         return {"success": True, "data": data, "extracted": extract_data(data)}
     except Exception as e:
         logger.error(f"Liquidation error: {e}")
@@ -222,7 +222,7 @@ RUN cat <<'HTMLEOF' > /app/templates/index.html
 :root {
   --bg: #070a12; --bg-elevated: #0d111f; --bg-card: #131829; --bg-card-hover: #1a2035;
   --border: #1e2740; --border-hover: #2a3560; --accent: #00e5c0; --accent-dim: rgba(0,229,192,0.08);
-  --text: #e8ecf4; --text-secondary: #8b95a8; --text-muted: #4a5568;
+  --text: #e8ecf4; --text-secondary: #8b95a8; --text-muted: #7b87a3;
   --danger: #ff4757; --danger-bg: rgba(255,71,87,0.08);
   --success: #2ed573; --success-bg: rgba(46,213,115,0.08);
   --warning: #ffa502; --warning-bg: rgba(255,165,2,0.08);
@@ -239,22 +239,22 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
 @keyframes countUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes pulse-ring { 0% { transform: scale(0.8); opacity: 1; } 100% { transform: scale(2.2); opacity: 0; } }
 @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
-.enter { animation: slideUp 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards; opacity: 0; }
+.enter { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; opacity: 0; }
 .enter-d1 { animation-delay: 0.08s; } .enter-d2 { animation-delay: 0.16s; } .enter-d3 { animation-delay: 0.24s; }
 .enter-d4 { animation-delay: 0.32s; } .enter-d5 { animation-delay: 0.40s; } .enter-d6 { animation-delay: 0.48s; }
 .skeleton { background: linear-gradient(90deg, var(--bg-card) 25%, #1a2035 50%, var(--bg-card) 75%); background-size: 200% 100%; animation: shimmer 1.8s infinite; border-radius: 8px; }
-.card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1); position: relative; overflow: hidden; }
+.card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1); position: relative; overflow: hidden; }
 .card::before { content: ''; position: absolute; inset: 0; border-radius: 16px; padding: 1px; background: linear-gradient(135deg, rgba(0,229,192,0.1), transparent 40%); -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0); -webkit-mask-composite: xor; mask-composite: exclude; opacity: 0; transition: opacity 0.35s; pointer-events: none; }
 .card:hover::before { opacity: 1; }
 .card:hover { border-color: var(--border-hover); transform: translateY(-3px); box-shadow: 0 20px 40px rgba(0,0,0,0.4), 0 0 0 1px rgba(0,229,192,0.06); }
 .status-live { position: relative; width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
 .status-live::after { content: ''; position: absolute; inset: -4px; border-radius: 50%; border: 1px solid var(--success); animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
-.tab { position: relative; padding: 10px 18px; border-radius: 12px; font-size: 13px; font-weight: 500; color: var(--text-secondary); background: transparent; border: 1px solid transparent; cursor: pointer; transition: all 0.25s; white-space: nowrap; display: flex; align-items: center; gap: 8px; }
+.tab { position: relative; padding: 10px 18px; min-height: 44px; border-radius: 12px; font-size: 13px; font-weight: 500; color: var(--text-secondary); background: transparent; border: 1px solid transparent; cursor: pointer; transition: all 0.25s; white-space: nowrap; display: flex; align-items: center; gap: 8px; }
 .tab:hover { color: var(--text); background: rgba(255,255,255,0.03); }
 .tab.active { color: var(--accent); background: var(--accent-dim); border-color: rgba(0,229,192,0.15); }
 .tab .tab-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0.5; }
 .tab.active .tab-dot { opacity: 1; box-shadow: 0 0 8px currentColor; }
-.panel { opacity: 0; transform: translateY(12px); transition: opacity 0.4s ease, transform 0.4s ease; display: none; }
+.panel { opacity: 0; transform: translateY(12px); transition: opacity 0.3s ease, transform 0.3s ease; display: none; }
 .panel.active { display: block; opacity: 1; transform: translateY(0); }
 .data-table { width: 100%; border-collapse: separate; border-spacing: 0; }
 .data-table th { padding: 14px 16px; text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); border-bottom: 1px solid var(--border); }
@@ -274,7 +274,7 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
 .mini-chart-wrap { position: relative; height: 180px; }
 .section-title { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; display: flex; align-items: center; gap: 10px; }
 .section-title::before { content: ''; width: 4px; height: 18px; border-radius: 2px; background: linear-gradient(180deg, var(--accent), transparent); }
-.search-input { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 10px; padding: 8px 14px; font-size: 13px; color: var(--text); outline: none; transition: all 0.2s; width: 220px; }
+.search-input { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 10px; padding: 8px 14px; min-height: 44px; font-size: 13px; color: var(--text); outline: none; transition: all 0.2s; width: 220px; }
 .search-input:focus { border-color: rgba(0,229,192,0.3); box-shadow: 0 0 0 3px rgba(0,229,192,0.05); }
 .search-input::placeholder { color: var(--text-muted); }
 .error-state { padding: 40px; text-align: center; color: var(--danger); }
@@ -283,7 +283,7 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
 .api-ref { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
 .api-ref-header { padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); display: flex; align-items: center; gap: 8px; cursor: pointer; transition: background 0.2s; }
 .api-ref-header:hover { background: rgba(255,255,255,0.02); }
-.api-ref-content { max-height: 0; overflow: hidden; transition: max-height 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+.api-ref-content { max-height: 0; overflow: hidden; transition: max-height 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
 .api-ref-content.open { max-height: 800px; }
 .api-endpoint { padding: 10px 16px; border-bottom: 1px solid rgba(30,39,64,0.5); font-size: 12px; display: flex; align-items: center; gap: 12px; }
 .api-endpoint:last-child { border-bottom: none; }
@@ -291,6 +291,9 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
 .api-path { font-family: 'JetBrains Mono', monospace; color: var(--text); font-size: 12px; }
 .api-desc { color: var(--text-muted); margin-left: auto; font-size: 11px; }
 @media (max-width: 768px) { .hide-mobile { display: none; } .search-input { width: 140px; } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}
 </style>
 </head>
 <body>
@@ -388,7 +391,7 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
         <div class="p-4 border-b flex items-center justify-between" style="border-color: var(--border);">
           <h2 class="section-title">All Coins</h2>
           <div class="flex items-center gap-3">
-            <input type="text" id="rsiSearch" placeholder="Search symbol..." class="search-input" oninput="filterRsiTable()">
+            <input type="text" id="rsiSearch" placeholder="Search symbol..." aria-label="Search symbol" class="search-input" oninput="filterRsiTable()">
             <span class="text-[11px] text-[#4a5568] mono" id="rsiCount">0 assets</span>
           </div>
         </div>
@@ -422,6 +425,16 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
             <thead><tr><th>Exchange</th><th>Asset</th><th class="text-right">Rate</th><th class="text-right">Annualized</th><th class="text-right hide-mobile">Timestamp</th></tr></thead>
             <tbody id="fundingTableBody"><tr><td colspan="5" class="p-8 text-center text-[#4a5568]"><div class="skeleton h-8 mx-auto max-w-md"></div></td></tr></tbody>
           </table>
+        </div>
+      </div>
+      <div class="card overflow-hidden mt-5">
+        <div class="api-ref-header" onclick="this.nextElementSibling.classList.toggle('open'); this.querySelector('svg').style.transform = this.nextElementSibling.classList.contains('open') ? 'rotate(180deg)' : 'rotate(0deg)';">
+          <svg class="w-4 h-4 transition-transform duration-300" style="color: var(--accent);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          <span>Raw Response (debug)</span>
+          <span style="margin-left: auto; color: var(--text-muted); font-size: 11px; font-weight: 400;">Click to expand</span>
+        </div>
+        <div class="api-ref-content">
+          <pre id="fundingRaw" class="text-xs mono overflow-auto p-4" style="max-height:400px; color:#8b95a8;"></pre>
         </div>
       </div>
     </div>
@@ -567,7 +580,7 @@ function getDataObj(json) {
 }
 
 function switchTab(tab) {
-  document.querySelectorAll('.panel').forEach(p => { p.classList.remove('active'); setTimeout(() => { if(!p.classList.contains('active')) p.style.display='none'; }, 400); });
+  document.querySelectorAll('.panel').forEach(p => { p.classList.remove('active'); setTimeout(() => { if(!p.classList.contains('active')) p.style.display='none'; }, 300); });
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.getElementById('tab-' + tab).classList.add('active');
   const panel = document.getElementById('panel-' + tab);
@@ -708,6 +721,7 @@ async function loadFunding() {
     const json = await res.json();
     if (!json.success) throw new Error(json.error);
     const data = getDataArray(json);
+    document.getElementById('fundingRaw').textContent = JSON.stringify(data.slice(0, 3), null, 2);
     document.getElementById('fundingCount').textContent = data.length + ' rates';
     const tbody = document.getElementById('fundingTableBody');
     tbody.innerHTML = data.slice(0, 50).map((item, i) => {
