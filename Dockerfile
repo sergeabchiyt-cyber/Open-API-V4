@@ -244,7 +244,7 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
 .enter-d4 { animation-delay: 0.32s; } .enter-d5 { animation-delay: 0.40s; } .enter-d6 { animation-delay: 0.48s; }
 .skeleton { background: linear-gradient(90deg, var(--bg-card) 25%, #1a2035 50%, var(--bg-card) 75%); background-size: 200% 100%; animation: shimmer 1.8s infinite; border-radius: 8px; }
 .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1); position: relative; overflow: hidden; }
-.card::before { content: ''; position: absolute; inset: 0; border-radius: 16px; padding: 1px; background: linear-gradient(135deg, rgba(0,229,192,0.1), transparent 40%); -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0); -webkit-mask-composite: xor; mask-composite: exclude; opacity: 0; transition: opacity 0.35s; pointer-events: none; }
+.card::before { content: ''; position: absolute; inset: 0; border-radius: 16px; padding: 1px; background: linear-gradient(135deg, rgba(0,229,192,0.1), transparent 40%); -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0); -webkit-mask-composite: xor; mask-composite: exclude; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
 .card:hover::before { opacity: 1; }
 .card:hover { border-color: var(--border-hover); transform: translateY(-3px); box-shadow: 0 20px 40px rgba(0,0,0,0.4), 0 0 0 1px rgba(0,229,192,0.06); }
 .status-live { position: relative; width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
@@ -422,7 +422,7 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
         </div>
         <div class="overflow-x-auto">
           <table class="data-table">
-            <thead><tr><th>Exchange</th><th>Asset</th><th class="text-right">Rate</th><th class="text-right">Annualized</th><th class="text-right hide-mobile">Timestamp</th></tr></thead>
+            <thead><tr><th>Exchange</th><th>Asset</th><th class="text-right">Rate</th><th class="text-right">Annualized</th><th class="text-right hide-mobile">Next Funding</th></tr></thead>
             <tbody id="fundingTableBody"><tr><td colspan="5" class="p-8 text-center text-[#4a5568]"><div class="skeleton h-8 mx-auto max-w-md"></div></td></tr></tbody>
           </table>
         </div>
@@ -459,11 +459,11 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
     <div id="panel-openinterest" class="panel">
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
         <div class="card p-5">
-          <h2 class="section-title mb-4">OI by Exchange</h2>
+          <h2 class="section-title mb-4">Open Interest History</h2>
           <div class="chart-wrap"><canvas id="oiChart"></canvas></div>
         </div>
         <div class="card p-5">
-          <h2 class="section-title mb-4">OI Change 24h</h2>
+          <h2 class="section-title mb-4">Volume History</h2>
           <div class="chart-wrap"><canvas id="oiChangeChart"></canvas></div>
         </div>
       </div>
@@ -715,25 +715,47 @@ function filterRsiTable() {
 }
 
 // === Funding ===
+function flattenFunding(data) {
+  const rows = [];
+  data.forEach(coin => {
+    const sym = coin.symbol || coin.name || '??';
+    Object.values(coin).forEach(v => {
+      if (Array.isArray(v)) {
+        v.forEach(e => {
+          if (e && typeof e === 'object' && 'fundingRate' in e) {
+            rows.push({
+              symbol: e.symbol || sym,
+              exName: e.exName || 'Unknown',
+              fundingRate: e.fundingRate,
+              intervalHours: e.intervalHours || 8,
+              nextFundingTime: e.nextFundingTime
+            });
+          }
+        });
+      }
+    });
+  });
+  return rows;
+}
+
 async function loadFunding() {
   try {
     const res = await fetch('/api/funding');
     const json = await res.json();
     if (!json.success) throw new Error(json.error);
-    const data = getDataArray(json);
-    document.getElementById('fundingRaw').textContent = JSON.stringify(data.slice(0, 3), null, 2);
+    const coins = getDataArray(json);
+    const data = flattenFunding(coins);
+    document.getElementById('fundingRaw').textContent = JSON.stringify(data.slice(0, 5), null, 2);
     document.getElementById('fundingCount').textContent = data.length + ' rates';
     const tbody = document.getElementById('fundingTableBody');
-    tbody.innerHTML = data.slice(0, 50).map((item, i) => {
-      const ex = gv(item, ['exName','exchange','ex','platform'], 'Unknown');
-      const sym = gv(item, ['symbol','s','sym','coin'], '--');
-      const rate = parseFloat(gv(item, ['fundingRate','rate','funding_rate'], 0));
-      const annual = rate * 3 * 365;
-      const ts = gv(item, ['time','timestamp','updateTime'], '--');
-      return '<tr class="enter" style="animation-delay:' + (i*0.02) + 's;animation-fill-mode:both;"><td class="font-medium text-sm">' + ex + '</td><td class="text-sm">' + sym + '</td><td class="text-right">' + badge(rate, 'funding') + '</td><td class="text-right mono text-[#8b95a8] text-sm">' + (isNaN(annual) ? '--' : (annual*100).toFixed(2) + '%') + '</td><td class="text-right hide-mobile text-[#4a5568] text-xs mono">' + ts + '</td></tr>';
+    tbody.innerHTML = data.slice(0, 100).map((item, i) => {
+      const rate = parseFloat(item.fundingRate);
+      const annual = rate * (24 / item.intervalHours) * 365;
+      const ts = item.nextFundingTime ? new Date(item.nextFundingTime).toLocaleString() : '--';
+      return '<tr class="enter" style="animation-delay:' + (i*0.02) + 's;animation-fill-mode:both;"><td class="font-medium text-sm">' + item.exName + '</td><td class="text-sm">' + item.symbol + '</td><td class="text-right">' + badge(rate, 'funding') + '</td><td class="text-right mono text-[#8b95a8] text-sm">' + (isNaN(annual) ? '--' : (annual*100).toFixed(2) + '%') + '</td><td class="text-right hide-mobile text-[#4a5568] text-xs mono">' + ts + '</td></tr>';
     }).join('');
-    const pos = data.filter(d => parseFloat(gv(d, ['fundingRate','rate'], 0)) > 0).length;
-    const neg = data.filter(d => parseFloat(gv(d, ['fundingRate','rate'], 0)) < 0).length;
+    const pos = data.filter(d => parseFloat(d.fundingRate) > 0).length;
+    const neg = data.filter(d => parseFloat(d.fundingRate) < 0).length;
     const neu = data.length - pos - neg;
     const ctx = document.getElementById('fundingChart').getContext('2d');
     if (charts.funding) charts.funding.destroy();
@@ -742,8 +764,8 @@ async function loadFunding() {
       data: { labels: ['Positive', 'Negative', 'Neutral'], datasets: [{ data: [pos, neg, neu], backgroundColor: ['rgba(255,71,87,0.7)', 'rgba(46,213,115,0.7)', 'rgba(139,149,168,0.3)'], borderColor: ['#ff4757', '#2ed573', '#8b95a8'], borderWidth: 2 }] },
       options: { responsive: true, maintainAspectRatio: false, cutout: '65%', plugins: { legend: { position: 'right', labels: { color: '#8b95a8', font: { size: 11 }, boxWidth: 12 } } } }
     });
-    const top = [...data].sort((a,b) => parseFloat(gv(b,['fundingRate','rate'],0)) - parseFloat(gv(a,['fundingRate','rate'],0))).slice(0, 5);
-    document.getElementById('fundingTop').innerHTML = top.map((item, i) => '<div class="flex items-center justify-between p-3 rounded-xl enter" style="background: var(--bg-elevated); border: 1px solid var(--border); animation-delay:' + (i*0.05) + 's;"><div class="flex items-center gap-2"><span class="text-[#4a5568] mono text-xs w-5">' + (i+1) + '</span><span class="font-medium text-sm">' + gv(item,['symbol','s','sym'], '?') + '</span><span class="text-[11px] text-[#4a5568]">' + gv(item,['exName','exchange'], '') + '</span></div>' + badge(gv(item,['fundingRate','rate'],0), 'funding') + '</div>').join('');
+    const top = [...data].sort((a,b) => Math.abs(parseFloat(b.fundingRate)) - Math.abs(parseFloat(a.fundingRate))).slice(0, 5);
+    document.getElementById('fundingTop').innerHTML = top.map((item, i) => '<div class="flex items-center justify-between p-3 rounded-xl enter" style="background: var(--bg-elevated); border: 1px solid var(--border); animation-delay:' + (i*0.05) + 's;"><div class="flex items-center gap-2"><span class="text-[#4a5568] mono text-xs w-5">' + (i+1) + '</span><span class="font-medium text-sm">' + item.symbol + '</span><span class="text-[11px] text-[#4a5568]">' + item.exName + '</span></div>' + badge(item.fundingRate, 'funding') + '</div>').join('');
   } catch (e) { console.error('Funding error:', e); document.getElementById('fundingTableBody').innerHTML = '<tr><td colspan="5" class="p-8 text-center text-[#ff4757]">Error: ' + e.message + '</td></tr>'; }
 }
 
@@ -784,24 +806,36 @@ async function loadOI() {
     const res = await fetch('/api/openinterest');
     const json = await res.json();
     if (!json.success) throw new Error(json.error);
-    const data = getDataArray(json);
-    document.getElementById('oiContent').innerHTML = '<pre class="text-xs mono overflow-auto max-h-96 p-4 rounded-xl" style="background: var(--bg-elevated); color: #8b95a8; border: 1px solid var(--border);">' + JSON.stringify(data.slice(0, 20), null, 2) + '</pre>';
-    const exchanges = {};
-    data.forEach(d => { const ex = gv(d, ['exchange','exName','ex','platform'], 'Other'); const oi = parseFloat(gv(d, ['openInterest','oi','open_interest','totalOi'], 0)); exchanges[ex] = (exchanges[ex] || 0) + oi; });
+    const d = getDataObj(json);
+    const dates = d.dateList || [];
+    const oiList = d.openInterestList || [];
+    const priceList = d.priceList || [];
+    const volList = d.volUsdList || [];
+    const n = dates.length;
+    const win = Math.min(90, n);
+    const slice = arr => arr.slice(n - win);
+    const numVal = v => (typeof v === 'number' ? v : parseFloat(v && (v.value ?? v.close ?? v.c)) || 0);
+
+    const labels = slice(dates).map(t => new Date(t).toLocaleDateString());
+    const oiVals = slice(oiList).map(numVal);
+    const priceVals = slice(priceList).map(numVal);
+    const volVals = slice(volList).map(numVal);
+
+    document.getElementById('oiContent').innerHTML = '<pre class="text-xs mono overflow-auto max-h-96 p-4 rounded-xl" style="background: var(--bg-elevated); color: #8b95a8; border: 1px solid var(--border);">' + JSON.stringify({ points: n, latestOI: oiVals[oiVals.length-1], latestPrice: priceVals[priceVals.length-1], latestVol: volVals[volVals.length-1] }, null, 2) + '</pre>';
+
     const ctx1 = document.getElementById('oiChart').getContext('2d');
     if (charts.oi) charts.oi.destroy();
     charts.oi = new Chart(ctx1, {
-      type: 'polarArea',
-      data: { labels: Object.keys(exchanges).slice(0, 8), datasets: [{ data: Object.values(exchanges).slice(0, 8), backgroundColor: ['rgba(0,229,192,0.5)', 'rgba(55,66,250,0.5)', 'rgba(255,71,87,0.5)', 'rgba(46,213,115,0.5)', 'rgba(255,165,2,0.5)', 'rgba(139,149,168,0.4)', 'rgba(0,229,192,0.3)', 'rgba(55,66,250,0.3)'] }] },
-      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { color: '#8b95a8', font: { size: 10 } } } }, scales: { r: { grid: { color: 'rgba(30,39,64,0.4)' }, ticks: { color: '#4a5568', backdropColor: 'transparent' } } } }
+      type: 'line',
+      data: { labels, datasets: [{ label: 'Open Interest (USD)', data: oiVals, borderColor: '#00e5c0', backgroundColor: 'rgba(0,229,192,0.1)', fill: true, tension: 0.3, pointRadius: 0 }] },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { grid: { color: 'rgba(30,39,64,0.4)' }, ticks: { color: '#4a5568', callback: v => fmtNum(v) } }, x: { grid: { display: false }, ticks: { color: '#4a5568', font: { size: 9 }, maxTicksLimit: 8 } } } }
     });
     const ctx2 = document.getElementById('oiChangeChart').getContext('2d');
-    const changeData = data.slice(0, 10).map(d => parseFloat(gv(d, ['oiChange','change24h','change','oi_change'], 0)));
     if (charts.oiCh) charts.oiCh.destroy();
     charts.oiCh = new Chart(ctx2, {
-      type: 'line',
-      data: { labels: data.slice(0, 10).map(d => gv(d, ['symbol','s','sym','coin'], '??')), datasets: [{ label: 'OI Change %', data: changeData, borderColor: '#00e5c0', backgroundColor: 'rgba(0,229,192,0.1)', fill: true, tension: 0.4, pointRadius: 4, pointBackgroundColor: '#00e5c0' }] },
-      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { grid: { color: 'rgba(30,39,64,0.4)' }, ticks: { color: '#4a5568' } }, x: { grid: { display: false }, ticks: { color: '#4a5568', font: { size: 10 } } } } }
+      type: 'bar',
+      data: { labels, datasets: [{ label: 'Volume (USD)', data: volVals, backgroundColor: 'rgba(55,66,250,0.5)', borderRadius: 4 }] },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { grid: { color: 'rgba(30,39,64,0.4)' }, ticks: { color: '#4a5568', callback: v => fmtNum(v) } }, x: { grid: { display: false }, ticks: { color: '#4a5568', font: { size: 9 }, maxTicksLimit: 8 } } } }
     });
   } catch (e) { console.error('OI error:', e); document.getElementById('oiContent').innerHTML = '<div class="error-state"><div class="text-sm font-medium">Open Interest data unavailable</div><div class="text-xs opacity-60">' + e.message + '</div></div>'; }
 }
