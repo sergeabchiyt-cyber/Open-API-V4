@@ -100,7 +100,6 @@ def extract_data(raw):
         for key in ["list", "topInflowList", "inflowList", "rankList", "coins"]:
             if key in raw and isinstance(raw[key], list):
                 return raw[key]
-        # Dig deeper if it's a nested dict
         if "data" in raw:
             d = raw["data"]
             if isinstance(d, list): return d
@@ -389,9 +388,9 @@ input[type="text"]:focus { border-color: var(--accent); }
 
   <!-- Market Cap Tab -->
   <div id="panel-marketcap" class="panel">
-    <div class="glass p-6 mb-6"><h2 class="text-base font-semibold mb-4">Market Cap vs Volume (Top 20)</h2><div style="height: 350px;"><canvas id="mcChart"></canvas></div></div>
+    <div class="glass p-6 mb-6"><h2 class="text-base font-semibold mb-4">Crypto Market Cap (Top 20)</h2><div style="height: 350px;"><canvas id="mcChart"></canvas></div></div>
     <div class="glass overflow-hidden mb-6">
-      <div class="p-4 border-b border-[var(--border)]"><h2 class="text-base font-semibold">Market Cap Rankings</h2></div>
+      <div class="p-4 border-b border-[var(--border)]"><h2 class="text-base font-semibold">Crypto Market Cap Rankings</h2></div>
       <div class="overflow-x-auto" style="max-height: 400px;">
         <table>
           <thead><tr><th>#</th><th>Asset</th><th class="text-right">Price</th><th class="text-right">Market Cap</th><th class="text-right">24h Vol</th></tr></thead>
@@ -585,16 +584,23 @@ async function loadMC() {
     const json = await res.json();
     if (!json.success) throw new Error(json.error);
     document.getElementById('mcDebug').innerText = JSON.stringify(json.data, null, 2);
-    const d = extractArr(json.data);
+    let d = extractArr(json.data);
+    
+    // Filter out traditional assets (Gold, NVDA, AAPL, etc.) that CoinGlass includes for comparison
+    const blacklist = ['Gold', 'Silver', 'Apple', 'Microsoft', 'NVIDIA', 'Amazon', 'Google', 'Meta', 'Tesla', 'S&P 500', 'SPY', 'Alphabet', 'Berkshire'];
+    d = d.filter(c => {
+      const name = gv(c, ['name', 'symbol', 'code', 's'], '').toLowerCase();
+      return !blacklist.some(b => name.includes(b.toLowerCase()));
+    });
     
     document.getElementById('mcTable').innerHTML = d.map((c,i) => `
-      <tr><td class="mono text-xs text-[var(--text-muted)]">${i+1}</td><td class="font-medium">${gv(c,['symbol','s'], '??')}</td><td class="text-right mono">${fmtP(gv(c,['price'], 0))}</td><td class="text-right mono">$${fmtN(gv(c,['marketCap'], 0))}</td><td class="text-right mono text-[var(--text-muted)]">$${fmtN(gv(c,['volume24h','vol'], 0))}</td></tr>
+      <tr><td class="mono text-xs text-[var(--text-muted)]">${i+1}</td><td class="font-medium">${gv(c,['symbol','code','s','name'], '??')}</td><td class="text-right mono">${fmtP(gv(c,['price','p'], 0))}</td><td class="text-right mono">$${fmtN(gv(c,['marketCap','market_cap','mc'], 0))}</td><td class="text-right mono text-[var(--text-muted)]">$${fmtN(gv(c,['volume24h','vol'], 0))}</td></tr>
     `).join('');
     
     if (charts.mc) charts.mc.destroy();
     charts.mc = new Chart(document.getElementById('mcChart'), {
       type: 'bar',
-      data: { labels: d.slice(0,20).map(c => gv(c,['symbol','s'],'?')), datasets: [{ data: d.slice(0,20).map(c => parseFloat(gv(c,['marketCap'], 0))), backgroundColor: 'rgba(0,240,168,0.6)', borderRadius: 4 }] },
+      data: { labels: d.slice(0,20).map(c => gv(c,['symbol','code','s','name'],'?')), datasets: [{ data: d.slice(0,20).map(c => parseFloat(gv(c,['marketCap','market_cap','mc'], 0))), backgroundColor: 'rgba(0,240,168,0.6)', borderRadius: 4 }] },
       options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { ticks: { callback: v => '$' + fmtN(v) }, grid: { color: 'rgba(255,255,255,0.05)' } }, x: { grid: { display: false } } } }
     });
   } catch(e) { console.error(e); }
@@ -704,7 +710,7 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
         <span class="method-get mono text-xs font-bold px-2 py-1 rounded">GET</span>
         <code class="mono text-sm text-[var(--accent)]">/api/marketcap</code>
       </div>
-      <p class="text-sm text-[var(--text-muted)] mb-4">Market cap rankings for the top 100 cryptocurrencies.</p>
+      <p class="text-sm text-[var(--text-muted)] mb-4">Market cap rankings for the top 100 cryptocurrencies (traditional assets like Gold/NVDA are filtered out).</p>
     </div>
   </div>
 </main>
