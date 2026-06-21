@@ -44,6 +44,11 @@ def _derive_key0(v: str, url: str = "") -> str:
 
 def decrypt(encrypted_body: str, user_token_b64: str, v: str, url: str = "") -> Dict[str, Any]:
     outer = json.loads(encrypted_body)
+    
+    # DEFENSIVE CHECK: If CoinGlass returns a standard unencrypted JSON error, pass it through.
+    if "data" not in outer:
+        return outer
+        
     payload = base64.b64decode(outer["data"])
     token = base64.b64decode(user_token_b64)
     key0 = _derive_key0(v, url)
@@ -87,6 +92,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from decrypt import fetch_and_decrypt
 import logging
+import traceback
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -123,6 +129,7 @@ async def get_rsi():
         data = await fetch_and_decrypt("https://capi.coinglass.com/api/spot/rsi/list", {"pageSize": 500, "pageNum": 1})
         return {"success": True, "data": data, "extracted": extract_data(data)}
     except Exception as e:
+        logger.error(f"RSI Error: {traceback.format_exc()}")
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
 @app.get("/api/funding")
@@ -131,6 +138,7 @@ async def get_funding():
         data = await fetch_and_decrypt("https://capi.coinglass.com/api/fundingRate/list", {"pageSize": 100, "pageNum": 1})
         return {"success": True, "data": data, "extracted": extract_data(data)}
     except Exception as e:
+        logger.error(f"Funding Error: {traceback.format_exc()}")
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
 @app.get("/api/liquidation")
@@ -139,6 +147,7 @@ async def get_liquidation():
         data = await fetch_and_decrypt("https://capi.coinglass.com/api/futures/liquidation/today", {"symbol": "BTC"})
         return {"success": True, "data": data, "extracted": extract_data(data)}
     except Exception as e:
+        logger.error(f"Liq Error: {traceback.format_exc()}")
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
 @app.get("/api/openinterest")
@@ -147,6 +156,7 @@ async def get_oi():
         data = await fetch_and_decrypt("https://capi.coinglass.com/api/openInterest/statistics", {})
         return {"success": True, "data": data, "extracted": extract_data(data)}
     except Exception as e:
+        logger.error(f"OI Error: {traceback.format_exc()}")
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
 @app.get("/api/etf")
@@ -155,6 +165,7 @@ async def get_etf():
         data = await fetch_and_decrypt("https://capi.coinglass.com/api/etf/overview", {})
         return {"success": True, "data": data, "extracted": extract_data(data)}
     except Exception as e:
+        logger.error(f"ETF Error: {traceback.format_exc()}")
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
 @app.get("/api/marketcap")
@@ -163,6 +174,7 @@ async def get_marketcap():
         data = await fetch_and_decrypt("https://capi.coinglass.com/api/marketCapRank", {"pageSize": 100})
         return {"success": True, "data": data, "extracted": extract_data(data)}
     except Exception as e:
+        logger.error(f"MC Error: {traceback.format_exc()}")
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
 if __name__ == "__main__":
@@ -449,7 +461,10 @@ async function loadRsi() {
   try {
     const res = await fetch('/api/rsi');
     const json = await res.json();
-    if (!json.success) throw new Error(json.error);
+    if (!json.success) {
+      document.getElementById('rsiDebug').innerText = "API ERROR:\n" + json.error;
+      throw new Error(json.error);
+    }
     
     document.getElementById('rsiDebug').innerText = JSON.stringify(json.data, null, 2);
     allRsi = extractArr(json.data);
@@ -482,7 +497,10 @@ async function loadRsi() {
     });
     
     document.getElementById('lastUpdate').innerText = new Date().toLocaleTimeString();
-  } catch(e) { console.error(e); }
+  } catch(e) {
+    console.error(e);
+    document.getElementById('rsiTable').innerHTML = `<tr><td colspan="6" class="p-8 text-center text-[var(--danger)]">Error loading data. Check Raw JSON panel.</td></tr>`;
+  }
 }
 
 function filterRsi() {
@@ -497,7 +515,10 @@ async function loadFunding() {
   try {
     const res = await fetch('/api/funding');
     const json = await res.json();
-    if (!json.success) throw new Error(json.error);
+    if (!json.success) {
+      document.getElementById('fundingDebug').innerText = "API ERROR:\n" + json.error;
+      throw new Error(json.error);
+    }
     document.getElementById('fundingDebug').innerText = JSON.stringify(json.data, null, 2);
     const coins = extractArr(json.data);
     let rows = [];
@@ -514,14 +535,20 @@ async function loadFunding() {
       data: { labels: top.map(e => gv(e,['symbol'],'?')), datasets: [{ data: top.map(e => parseFloat(e.fundingRate)*100), backgroundColor: top.map(e => parseFloat(e.fundingRate) > 0 ? 'rgba(255,71,87,0.6)' : 'rgba(46,213,115,0.6)'), borderRadius: 4 }] },
       options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { callback: v => v + '%' } }, x: { grid: { display: false }, ticks: { font: { size: 10 } } } } }
     });
-  } catch(e) { console.error(e); }
+  } catch(e) {
+    console.error(e);
+    document.getElementById('fundingTable').innerHTML = `<tr><td colspan="4" class="p-8 text-center text-[var(--danger)]">Error loading data. Check Raw JSON panel.</td></tr>`;
+  }
 }
 
 async function loadLiq() {
   try {
     const res = await fetch('/api/liquidation');
     const json = await res.json();
-    if (!json.success) throw new Error(json.error);
+    if (!json.success) {
+      document.getElementById('liqDebug').innerText = "API ERROR:\n" + json.error;
+      throw new Error(json.error);
+    }
     const d = json.data;
     document.getElementById('liqRaw').innerText = JSON.stringify(d, null, 2);
     document.getElementById('liqDebug').innerText = JSON.stringify(d, null, 2);
@@ -538,7 +565,10 @@ async function loadOI() {
   try {
     const res = await fetch('/api/openinterest');
     const json = await res.json();
-    if (!json.success) throw new Error(json.error);
+    if (!json.success) {
+      document.getElementById('oiDebug').innerText = "API ERROR:\n" + json.error;
+      throw new Error(json.error);
+    }
     const d = json.data;
     document.getElementById('oiRaw').innerText = JSON.stringify(d, null, 2);
     document.getElementById('oiDebug').innerText = JSON.stringify(d, null, 2);
@@ -555,7 +585,10 @@ async function loadETF() {
   try {
     const res = await fetch('/api/etf');
     const json = await res.json();
-    if (!json.success) throw new Error(json.error);
+    if (!json.success) {
+      document.getElementById('etfDebug').innerText = "API ERROR:\n" + json.error;
+      throw new Error(json.error);
+    }
     const d = json.data;
     document.getElementById('etfDebug').innerText = JSON.stringify(d, null, 2);
     const etfList = extractArr(d);
@@ -582,25 +615,24 @@ async function loadMC() {
   try {
     const res = await fetch('/api/marketcap');
     const json = await res.json();
-    if (!json.success) throw new Error(json.error);
+    if (!json.success) {
+      document.getElementById('mcDebug').innerText = "API ERROR:\n" + json.error;
+      throw new Error(json.error);
+    }
     document.getElementById('mcDebug').innerText = JSON.stringify(json.data, null, 2);
     let d = extractArr(json.data);
     
-    // 1. Create a strict whitelist from our 100% crypto RSI endpoint
+    // Filter out traditional assets
     const cryptoWhitelist = new Set(allRsi.map(c => gv(c, ['symbol','s'], '').toUpperCase()));
-    
-    // 2. Comprehensive blacklist of traditional assets that CoinGlass includes
     const stockBlacklist = ['GOLD', 'SILVER', 'APPLE', 'MICROSOFT', 'NVIDIA', 'NVDA', 'AMAZON', 'AMZN', 'GOOGLE', 'GOOGL', 'META', 'FB', 'TESLA', 'TSLA', 'S&P', 'SPY', 'SPX', 'ALPHABET', 'BERKSHIRE', 'BRK', 'PLATINUM', 'PALLADIUM', 'NIKKEI', 'DOW', 'DJI', 'NASDAQ', 'COMP', 'RUSSELL', 'RUT', 'FTSE', 'DAX', 'CAC', 'HANG', 'SHANGHAI', 'OIL', 'CRUDE', 'BRENT'];
     
-    // 3. Filter out anything not in the crypto whitelist, or explicitly in the blacklist
     d = d.filter(c => {
       const sym = gv(c, ['symbol','code','s','name'], '').toUpperCase();
       if (stockBlacklist.some(b => sym.includes(b))) return false;
-      // If RSI list is loaded, ONLY allow assets present in that list
       if (cryptoWhitelist.size > 0) {
         return cryptoWhitelist.has(sym);
       }
-      return false; // If RSI hasn't loaded yet, don't show potentially fake stocks
+      return false;
     });
     
     document.getElementById('mcTable').innerHTML = d.map((c,i) => `
