@@ -157,7 +157,7 @@ async def endpoint(eid: str):
         return {"success": True, "data": d, "extracted": extract(d)}
     except Exception as e:
         logger.error(traceback.format_exc())
-        return JSONResponse(500, {"success": False, "error": str(e)})
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
 @app.post("/api/explore")
 async def explore(req: Request):
@@ -171,7 +171,7 @@ async def explore(req: Request):
         return {"success": True, "url": url, "data": d}
     except Exception as e:
         logger.error(traceback.format_exc())
-        return JSONResponse(500, {"success": False, "url": url, "error": str(e)})
+        return JSONResponse(status_code=500, content={"success": False, "url": url, "error": str(e)})
 
 if __name__ == "__main__":
     import uvicorn
@@ -493,6 +493,10 @@ async function fetchPanel(id) {
   $('content').innerHTML = skelHTML();
   try {
     const r = await fetch('/api/' + id);
+    if (!r.ok) {
+      const text = await r.text();
+      throw new Error(`Server Error ${r.status}: ${text.substring(0, 100)}`);
+    }
     const j = await r.json();
     $('tbTime').textContent = new Date().toLocaleTimeString();
     if (!j.success) { showErr(j.error); return; }
@@ -1251,6 +1255,10 @@ async function runExplore() {
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({path, params})
     });
+    if (!r.ok) {
+      const text = await r.text();
+      throw new Error(`Server Error ${r.status}: ${text.substring(0, 100)}`);
+    }
     const j = await r.json();
     $('tbTime').textContent = new Date().toLocaleTimeString();
     if (!j.success) {
