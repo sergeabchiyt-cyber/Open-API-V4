@@ -188,7 +188,7 @@ if __name__ == "__main__":
 PYEOF
 
 # ============================================================
-# dashboard.html – Uber‑sleek UI with dynamic sidebar & cards
+# dashboard.html – Complete UI remastered with candlestick charts
 # ============================================================
 RUN cat <<'HTMLEOF' > /app/templates/dashboard.html
 <!DOCTYPE html>
@@ -198,24 +198,24 @@ RUN cat <<'HTMLEOF' > /app/templates/dashboard.html
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CoinGlass Terminal</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 <style>
 :root {
-  --bg: #070b14;
-  --panel: #0b1124;
-  --card: rgba(14, 20, 40, 0.85);
-  --border: rgba(255,255,255,0.07);
+  --bg: #060b16;
+  --surface: #0c1325;
+  --surface2: #101b30;
+  --border: rgba(255,255,255,0.06);
   --accent: #f0b429;
-  --accent-dim: rgba(240, 180, 41, 0.12);
+  --accent-dim: rgba(240,180,41,0.12);
   --blue: #4f9fff;
   --green: #3ddc84;
   --red: #ff4d6d;
-  --text: #c8d2e8;
-  --text-bright: #edf2fa;
+  --text: #b4c2e0;
+  --text-bright: #e5edff;
   --muted: #4a5b7a;
   --radius: 14px;
-  --shadow: 0 12px 40px rgba(0,0,0,0.6);
+  --transition: 0.2s ease;
 }
 * { margin:0; padding:0; box-sizing:border-box }
 body {
@@ -226,65 +226,106 @@ body {
   height: 100vh;
   overflow: hidden;
 }
-::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
 
-/* Layout */
 .shell { display: flex; height: 100vh; }
+
 .sidebar {
-  width: 200px;
+  width: 220px;
   flex-shrink: 0;
-  background: var(--panel);
+  background: var(--surface);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   overflow-y: auto;
   padding-bottom: 16px;
+  transition: width var(--transition);
 }
+.sidebar.collapsed { width: 48px; }
+
 .main {
   flex: 1;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
+
 .topbar {
-  height: 44px;
+  height: 46px;
   flex-shrink: 0;
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
   padding: 0 20px;
-  background: rgba(7,11,20,0.92);
-  backdrop-filter: blur(8px);
-}
-.content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 20px 24px 32px;
+  background: rgba(6,11,22,0.9);
+  backdrop-filter: blur(10px);
+  z-index: 5;
 }
 
-/* Sidebar */
 .sb-logo {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 16px 14px 12px;
+  padding: 14px 14px 10px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  transition: all var(--transition);
 }
+.collapsed .sb-logo { justify-content: center; padding: 14px 8px; }
+.sb-logo-text { overflow: hidden; white-space: nowrap; transition: opacity var(--transition); }
+.collapsed .sb-logo-text { opacity: 0; width: 0; }
 .sb-logo-text span { font-weight: 700; font-size: 15px; color: var(--text-bright); letter-spacing: -0.3px; }
-.sb-logo-text small { font-family: 'JetBrains Mono', monospace; font-size: 9px; color: var(--accent); letter-spacing: 0.12em; text-transform: uppercase; }
+.sb-logo-text small { font-family: 'JetBrains Mono', monospace; font-size: 9px; color: var(--accent); letter-spacing: 0.1em; text-transform: uppercase; }
+
+.sb-search {
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  transition: all var(--transition);
+}
+.collapsed .sb-search { padding: 8px 6px; }
+.sb-search input {
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  color: var(--text-bright);
+  font-family: 'Inter', sans-serif;
+  font-size: 11px;
+  outline: none;
+  transition: border-color var(--transition);
+}
+.sb-search input:focus { border-color: var(--accent); }
+.collapsed .sb-search input { display: none; }
 
 .sb-cat {
-  padding: 16px 14px 4px;
+  padding: 14px 14px 4px;
   font-size: 9px;
   font-weight: 700;
   color: var(--muted);
   letter-spacing: 0.12em;
   text-transform: uppercase;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: color var(--transition);
 }
+.sb-cat:hover { color: var(--text); }
+.sb-cat .arrow {
+  font-size: 8px;
+  transition: transform var(--transition);
+  display: inline-block;
+}
+.sb-cat.collapsed .arrow { transform: rotate(-90deg); }
+.collapsed .sb-cat { padding: 14px 8px 4px; justify-content: center; }
+.collapsed .sb-cat span:not(.arrow) { display: none; }
+.sb-items { overflow: hidden; transition: max-height 0.25s ease, opacity 0.2s; }
+.sb-items.hidden { max-height: 0; opacity: 0; }
+
 .sb-item {
   display: flex;
   align-items: center;
@@ -295,29 +336,32 @@ body {
   color: var(--text);
   border-left: 2px solid transparent;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all var(--transition);
   user-select: none;
+  overflow: hidden;
+  white-space: nowrap;
 }
 .sb-item:hover { background: rgba(255,255,255,0.03); color: var(--text-bright); }
 .sb-item.active { color: var(--accent); border-left-color: var(--accent); background: var(--accent-dim); }
-.sb-item .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); flex-shrink: 0; transition: background 0.15s; }
+.sb-item .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); flex-shrink: 0; transition: background var(--transition); }
 .sb-item.active .dot { background: var(--accent); }
 .sb-item .badge {
   margin-left: auto;
-  background: rgba(255,255,255,0.06);
+  background: rgba(255,255,255,0.05);
   padding: 0 8px;
   border-radius: 10px;
   font-size: 9px;
   color: var(--muted);
   font-weight: 600;
 }
+.collapsed .sb-item { justify-content: center; padding: 10px 6px; }
+.collapsed .sb-item span:not(.dot) { display: none; }
 
-/* Topbar */
 .tb-status { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--green); font-weight: 500; }
 .tb-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
 @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:0.35 } }
 .tb-chip { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--muted); }
-.tb-chip b { color: var(--text); font-weight: 500; }
+.tb-chip b { color: var(--text-bright); font-weight: 500; }
 .tb-time { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--muted); margin-left: auto; }
 .tb-refresh {
   padding: 4px 12px;
@@ -325,22 +369,39 @@ body {
   border-radius: 6px;
   font-size: 11px;
   color: var(--muted);
-  font-family: 'Inter', sans-serif;
-  transition: all 0.15s;
   background: transparent;
+  cursor: pointer;
+  transition: all var(--transition);
 }
 .tb-refresh:hover { border-color: var(--accent); color: var(--accent); }
+.tb-toggle-sidebar {
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  padding: 4px 8px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all var(--transition);
+  line-height: 1;
+}
+.tb-toggle-sidebar:hover { border-color: var(--accent); color: var(--accent); }
 
-/* Cards */
+.content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px 32px;
+}
+
 .card {
-  background: var(--card);
+  background: rgba(14,20,40,0.85);
+  backdrop-filter: blur(4px);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 18px 20px;
-  backdrop-filter: blur(4px);
-  transition: border-color 0.2s;
+  margin-bottom: 16px;
 }
-.card:hover { border-color: rgba(255,255,255,0.12); }
 .card-title {
   font-size: 10px;
   font-weight: 600;
@@ -349,7 +410,8 @@ body {
   color: var(--muted);
   margin-bottom: 10px;
 }
-.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-bottom: 18px; }
+
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-bottom: 18px; }
 .stat-box {
   background: rgba(255,255,255,0.02);
   border: 1px solid var(--border);
@@ -360,9 +422,9 @@ body {
 .stat-box .value { font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 600; color: var(--text-bright); }
 .stat-box .sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
 
-.chart-container { height: 220px; position: relative; margin-bottom: 16px; }
+.chart-container { height: 300px; position: relative; margin-bottom: 16px; }
+.chart-container canvas { border-radius: var(--radius); }
 
-/* Tables */
 .table-wrap {
   background: var(--card);
   border: 1px solid var(--border);
@@ -396,7 +458,7 @@ thead th {
   white-space: nowrap;
   cursor: pointer;
   user-select: none;
-  transition: color 0.15s;
+  transition: color var(--transition);
 }
 thead th:hover { color: var(--text); }
 thead th.sorted-asc::after { content: " ↑"; color: var(--accent); }
@@ -405,7 +467,6 @@ tbody td { padding: 7px 12px; border-bottom: 1px solid rgba(255,255,255,0.03); }
 tbody tr:last-child td { border-bottom: none; }
 tbody tr:hover td { background: rgba(255,255,255,0.02); }
 
-/* Badges */
 .badge {
   display: inline-block;
   padding: 1px 8px;
@@ -420,7 +481,6 @@ tbody tr:hover td { background: rgba(255,255,255,0.02); }
 .bg-neutral { background: rgba(255,255,255,0.05); color: var(--muted); }
 .bg-accent { background: var(--accent-dim); color: var(--accent); }
 
-/* Raw toggle */
 .raw-toggle {
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
@@ -432,7 +492,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.02); }
   padding: 8px 0;
   border-top: 1px solid var(--border);
   margin-top: 10px;
-  transition: color 0.15s;
+  transition: color var(--transition);
 }
 .raw-toggle:hover { color: var(--accent); }
 .raw-box {
@@ -451,7 +511,6 @@ tbody tr:hover td { background: rgba(255,255,255,0.02); }
   display: none;
 }
 
-/* Explorer */
 .explorer-card {
   background: var(--card);
   border: 1px solid var(--border);
@@ -462,7 +521,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.02); }
 .explorer-card label { font-size: 9px; font-weight: 600; text-transform: uppercase; color: var(--muted); letter-spacing: 0.08em; display: block; margin-bottom: 4px; }
 .explorer-card input, .explorer-card textarea {
   width: 100%;
-  background: var(--panel);
+  background: var(--surface2);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px 12px;
@@ -470,7 +529,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.02); }
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
   outline: none;
-  transition: border-color 0.15s;
+  transition: border-color var(--transition);
   margin-bottom: 12px;
 }
 .explorer-card input:focus, .explorer-card textarea:focus { border-color: var(--accent); }
@@ -484,7 +543,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.02); }
   border-radius: 8px;
   border: none;
   cursor: pointer;
-  transition: opacity 0.15s;
+  transition: opacity var(--transition);
 }
 .explorer-btn:hover { opacity: 0.85; }
 .chip-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
@@ -496,11 +555,10 @@ tbody tr:hover td { background: rgba(255,255,255,0.02); }
   font-size: 9px;
   color: var(--muted);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all var(--transition);
 }
 .chip:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
 
-/* Skeleton */
 .skeleton {
   background: linear-gradient(90deg, rgba(255,255,255,0.02) 25%, rgba(255,255,255,0.06) 50%, rgba(255,255,255,0.02) 75%);
   background-size: 200% 100%;
@@ -509,24 +567,35 @@ tbody tr:hover td { background: rgba(255,255,255,0.02); }
 }
 @keyframes shimmer { 0% { background-position: -200% 0 } 100% { background-position: 200% 0 } }
 
-/* Misc */
 .error-box { background: rgba(255,77,109,0.08); border: 1px solid rgba(255,77,109,0.2); border-radius: 10px; padding: 14px 16px; color: var(--red); font-family: 'JetBrains Mono', monospace; font-size: 12px; margin-bottom: 14px; }
 .error-box strong { display: block; font-weight: 600; margin-bottom: 4px; }
 .empty-state { text-align: center; padding: 40px 20px; color: var(--muted); }
 .empty-state .icon { font-size: 28px; margin-bottom: 8px; }
 
-/* Responsive */
 @media (max-width: 768px) {
   .sidebar { width: 48px; }
-  .sb-logo-text, .sb-cat, .sb-item span { display: none; }
-  .sb-item { padding: 10px; justify-content: center; }
-  .stats-grid { grid-template-columns: 1fr 1fr; }
+  .sb-logo-text, .sb-cat span:not(.arrow), .sb-item span { display: none; }
+  .sb-item { padding: 10px 6px; justify-content: center; }
 }
 </style>
 </head>
 <body>
 <div class="shell">
-  <nav class="sidebar" id="sidebar"></nav>
+  <nav class="sidebar" id="sidebar">
+    <div class="sb-logo">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+        <rect width="24" height="24" rx="6" fill="#f0b429"/>
+        <path d="M12 3L4 13h6v8l8-10h-6V3z" fill="#060b16"/>
+      </svg>
+      <div class="sb-logo-text">
+        <span>CoinGlass</span><br><small>Terminal</small>
+      </div>
+    </div>
+    <div class="sb-search">
+      <input type="text" placeholder="Filter endpoints..." id="searchInput" oninput="filterSidebar()">
+    </div>
+    <div id="sidebar-nav"></div>
+  </nav>
   <div class="main">
     <div class="topbar">
       <div class="tb-status"><span class="tb-dot"></span>LIVE</div>
@@ -534,8 +603,14 @@ tbody tr:hover td { background: rgba(255,255,255,0.02); }
       <div class="tb-chip" id="tbPanel">Select endpoint</div>
       <div class="tb-time" id="tbTime">--:--:--</div>
       <button class="tb-refresh" onclick="refresh()">↻ Refresh</button>
+      <button class="tb-toggle-sidebar" onclick="toggleSidebar()">☰</button>
     </div>
-    <div class="content" id="content"></div>
+    <div class="content" id="content">
+      <div class="empty-state">
+        <div class="icon">📊</div>
+        <div>Select an endpoint from the sidebar to load data</div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -543,9 +618,10 @@ tbody tr:hover td { background: rgba(255,255,255,0.02); }
 const $ = id => document.getElementById(id);
 let currentId = null;
 let registry = [];
-let charts = {};
+let chartInstance = null;
+let chartSeries = null;
 
-// ── Fetch registry ────────────────────────────────────────────
+// ── Fetch registry & build sidebar ────────────────────────────
 async function loadRegistry() {
   const r = await fetch('/api/registry');
   const j = await r.json();
@@ -559,42 +635,66 @@ function buildSidebar() {
     if (!cats[e.cat]) cats[e.cat] = [];
     cats[e.cat].push(e);
   });
-  const sidebar = document.getElementById('sidebar');
-  let html = `
-    <div class="sb-logo">
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-        <rect width="24" height="24" rx="6" fill="#f0b429"/>
-        <path d="M12 3L4 13h6v8l8-10h-6V3z" fill="#070b14"/>
-      </svg>
-      <div class="sb-logo-text"><span>CoinGlass</span><small>Terminal</small></div>
-    </div>
-  `;
+  const sidebarNav = document.getElementById('sidebar-nav');
+  let html = '';
   for (const [cat, items] of Object.entries(cats)) {
-    html += `<div class="sb-cat">${cat}</div>`;
+    html += `<div class="sb-cat" onclick="toggleCategory(this)">
+      <span class="arrow">▾</span><span>${cat}</span>
+    </div>
+    <div class="sb-items" data-cat="${cat}">`;
     items.forEach(e => {
-      html += `<div class="sb-item" data-id="${e.id}" onclick="loadEndpoint('${e.id}')">
+      html += `<div class="sb-item" data-id="${e.id}" data-cat="${cat}" onclick="loadEndpoint('${e.id}')">
         <span class="dot"></span>
         <span>${e.label}</span>
         <span class="badge">${Object.keys(e.params || {}).length}</span>
       </div>`;
     });
+    html += `</div>`;
   }
-  // Explorer
-  html += `<div class="sb-cat">Tools</div>
-    <div class="sb-item" data-id="explorer" onclick="showExplorer()">
-      <span class="dot" style="background:var(--accent)"></span>
-      <span>API Explorer</span>
+  // Explorer entry
+  html += `<div class="sb-cat" onclick="toggleCategory(this)"><span class="arrow">▾</span><span>Tools</span></div>
+    <div class="sb-items" data-cat="Tools">
+      <div class="sb-item" data-id="explorer" onclick="showExplorer()">
+        <span class="dot" style="background:var(--accent)"></span>
+        <span>API Explorer</span>
+      </div>
     </div>`;
-  sidebar.innerHTML = html;
+  sidebarNav.innerHTML = html;
+  // Collapse all categories by default (or expand first)
+  document.querySelectorAll('.sb-cat').forEach(catEl => toggleCategory(catEl, false));
+  // Expand first category
+  const firstCat = document.querySelector('.sb-cat');
+  if (firstCat) toggleCategory(firstCat, true);
 }
 
-// ── Navigation ────────────────────────────────────────────────
+function toggleCategory(el, force = null) {
+  const items = el.nextElementSibling;
+  if (!items || !items.classList.contains('sb-items')) return;
+  const isHidden = items.classList.contains('hidden');
+  if (force === true || (force === null && isHidden)) {
+    items.classList.remove('hidden');
+    el.classList.remove('collapsed');
+  } else {
+    items.classList.add('hidden');
+    el.classList.add('collapsed');
+  }
+}
+
+function filterSidebar() {
+  const q = document.getElementById('searchInput').value.toLowerCase();
+  document.querySelectorAll('.sb-item').forEach(el => {
+    const text = el.textContent.toLowerCase();
+    el.style.display = text.includes(q) ? '' : 'none';
+  });
+}
+
 function setActive(id) {
   document.querySelectorAll('.sb-item').forEach(el => el.classList.remove('active'));
   const active = document.querySelector(`.sb-item[data-id="${id}"]`);
   if (active) active.classList.add('active');
 }
 
+// ── Navigation & Data Fetch ───────────────────────────────────
 function loadEndpoint(id) {
   currentId = id;
   setActive(id);
@@ -628,23 +728,29 @@ function skeletonHTML() {
     <div class="stats-grid">
       ${Array(3).fill('<div class="stat-box skeleton" style="height:60px"></div>').join('')}
     </div>
-    <div class="card skeleton" style="height:200px;margin-bottom:16px"></div>
+    <div class="card skeleton" style="height:280px;margin-bottom:16px"></div>
     <div class="table-wrap skeleton" style="height:260px"></div>
   `;
 }
 
+// ── Data Rendering ────────────────────────────────────────────
 function renderData(data, extracted) {
   const list = extracted.length ? extracted : (Array.isArray(data) ? data : []);
-  // Build stats
+  // Stats
   let stats = [];
   if (list.length) {
-    const keys = Object.keys(list[0] || {});
-    keys.slice(0, 4).forEach(k => {
-      const values = list.map(item => parseFloat(item[k])).filter(v => !isNaN(v));
+    const keys = Object.keys(list[0] || {}).filter(k => typeof list[0][k] === 'number' || !isNaN(parseFloat(list[0][k])));
+    const chosen = keys.slice(0, 4);
+    chosen.forEach(k => {
+      const values = list.map(item => {
+        const v = parseFloat(item[k]);
+        return isNaN(v) ? null : v;
+      }).filter(v => v !== null);
       if (values.length) {
-        const avg = values.reduce((a,b) => a+b, 0) / values.length;
+        const min = Math.min(...values);
         const max = Math.max(...values);
-        stats.push({ label: k, value: max.toFixed(2), sub: `avg ${avg.toFixed(2)}` });
+        const avg = values.reduce((a,b) => a+b, 0) / values.length;
+        stats.push({ label: k, value: formatCompact(max), sub: `min ${formatCompact(min)} · avg ${formatCompact(avg)}` });
       }
     });
   }
@@ -662,25 +768,19 @@ function renderData(data, extracted) {
   });
   html += `</div>`;
 
-  // Chart – if numeric fields exist
-  if (list.length > 1) {
-    const first = list[0];
-    const numericKeys = Object.keys(first).filter(k => !isNaN(parseFloat(first[k])));
-    if (numericKeys.length) {
-      const chartKey = numericKeys[0];
-      html += `<div class="card" style="margin-bottom:16px">
-        <div class="card-title">${chartKey} trend</div>
-        <div class="chart-container"><canvas id="chartCanvas"></canvas></div>
-      </div>`;
-    }
-  }
+  // Chart container
+  const chartContainerId = 'chart-' + Date.now();
+  html += `<div class="card" style="margin-bottom:16px">
+    <div class="card-title">Interactive Chart</div>
+    <div class="chart-container" id="${chartContainerId}"></div>
+  </div>`;
 
   // Table
   if (list.length) {
     const cols = Object.keys(list[0]).slice(0, 8);
     html += `<div class="table-wrap">
       <div class="table-head">
-        <span class="title">Data</span>
+        <span class="title">Data Table</span>
         <span class="meta">${list.length} rows</span>
       </div>
       <div class="table-scroll">
@@ -692,8 +792,8 @@ function renderData(data, extracted) {
                 let val = row[c];
                 if (val === undefined || val === null) val = '—';
                 if (typeof val === 'number') {
-                  if (Math.abs(val) > 1000) val = '$' + formatNum(val);
-                  else if (Math.abs(val) < 0.01) val = val.toFixed(6);
+                  if (Math.abs(val) > 1000) val = formatCompact(val);
+                  else if (Math.abs(val) < 0.01 && val !== 0) val = val.toFixed(6);
                   else val = val.toFixed(2);
                 } else if (typeof val === 'object') {
                   val = JSON.stringify(val).slice(0, 40);
@@ -717,20 +817,9 @@ function renderData(data, extracted) {
 
   // Draw chart
   if (list.length > 1) {
-    const canvas = document.getElementById('chartCanvas');
-    if (canvas) {
-      const ctx = canvas.getContext('2d');
-      const numericKey = Object.keys(list[0]).find(k => !isNaN(parseFloat(list[0][k])));
-      if (numericKey) {
-        const labels = list.map((_, i) => i+1);
-        const values = list.map(row => parseFloat(row[numericKey]) || 0);
-        if (charts.main) charts.main.destroy();
-        charts.main = new Chart(ctx, {
-          type: 'line',
-          data: { labels, datasets: [{ data: values, borderColor: '#f0b429', backgroundColor: 'rgba(240,180,41,0.08)', fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2 }] },
-          options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { grid: { color: 'rgba(255,255,255,0.04)' } }, x: { grid: { display: false } } } }
-        });
-      }
+    const container = document.getElementById(chartContainerId);
+    if (container) {
+      renderChart(container, list);
     }
   }
 
@@ -744,8 +833,9 @@ function renderData(data, extracted) {
         const rows = Array.from(tbody.querySelectorAll('tr'));
         const dir = th.classList.contains('sorted-asc') ? -1 : 1;
         rows.sort((a, b) => {
-          const va = a.cells[Array.from(th.parentElement.children).indexOf(th)]?.textContent || '';
-          const vb = b.cells[Array.from(th.parentElement.children).indexOf(th)]?.textContent || '';
+          const idx = Array.from(th.parentElement.children).indexOf(th);
+          const va = a.cells[idx]?.textContent || '';
+          const vb = b.cells[idx]?.textContent || '';
           const na = parseFloat(va), nb = parseFloat(vb);
           return (!isNaN(na) && !isNaN(nb)) ? (na - nb) * dir : va.localeCompare(vb) * dir;
         });
@@ -757,16 +847,105 @@ function renderData(data, extracted) {
   }
 }
 
+// ── Chart rendering with lightweight-charts ───────────────────
+function renderChart(container, data) {
+  // Detect OHLC columns
+  const keys = Object.keys(data[0]);
+  const hasOHLC = ['open','high','low','close'].every(k => keys.some(kk => kk.toLowerCase() === k));
+  const timeKey = keys.find(k => /time|date|timestamp/i.test(k)) || '';
+  const timeData = timeKey ? data.map(d => d[timeKey]) : data.map((_, i) => i);
+
+  // Destroy previous chart
+  if (chartInstance) {
+    chartInstance.remove();
+    chartInstance = null;
+    chartSeries = null;
+  }
+
+  chartInstance = LightweightCharts.createChart(container, {
+    layout: {
+      background: { type: 'solid', color: 'rgba(14,20,40,0.85)' },
+      textColor: '#b4c2e0',
+    },
+    grid: {
+      vertLines: { color: 'rgba(255,255,255,0.04)' },
+      horzLines: { color: 'rgba(255,255,255,0.04)' },
+    },
+    crosshair: {
+      mode: LightweightCharts.CrosshairMode.Normal,
+      vertLine: { color: '#f0b429', labelBackgroundColor: '#f0b429' },
+      horzLine: { color: '#f0b429', labelBackgroundColor: '#f0b429' },
+    },
+    rightPriceScale: { borderColor: 'rgba(255,255,255,0.1)' },
+    timeScale: { borderColor: 'rgba(255,255,255,0.1)', timeVisible: true },
+    width: container.clientWidth,
+    height: 280,
+  });
+
+  if (hasOHLC) {
+    const ohlcData = data.map((d, i) => ({
+      time: convertTime(timeData[i]),
+      open: parseFloat(d.open ?? d.Open ?? 0),
+      high: parseFloat(d.high ?? d.High ?? 0),
+      low: parseFloat(d.low ?? d.Low ?? 0),
+      close: parseFloat(d.close ?? d.Close ?? 0),
+    })).filter(d => d.time);
+    chartSeries = chartInstance.addCandlestickSeries({
+      upColor: '#3ddc84',
+      downColor: '#ff4d6d',
+      borderVisible: false,
+      wickUpColor: '#3ddc84',
+      wickDownColor: '#ff4d6d',
+    });
+    chartSeries.setData(ohlcData);
+  } else {
+    // Fallback: line chart on first numeric column
+    const numericKey = keys.find(k => typeof data[0][k] === 'number' || !isNaN(parseFloat(data[0][k])));
+    if (numericKey) {
+      const lineData = data.map((d, i) => ({
+        time: convertTime(timeData[i]),
+        value: parseFloat(d[numericKey]) || 0,
+      })).filter(d => d.time);
+      chartSeries = chartInstance.addLineSeries({
+        color: '#f0b429',
+        lineWidth: 2,
+      });
+      chartSeries.setData(lineData);
+    }
+  }
+  chartInstance.timeScale().fitContent();
+}
+
+function convertTime(value) {
+  // Accept Unix timestamps (seconds or ms), ISO strings, or index
+  if (typeof value === 'number') {
+    // If it's in seconds (10 digits) convert to ms
+    if (value < 1e12) value *= 1000;
+    return value;
+  }
+  if (typeof value === 'string') {
+    const d = new Date(value);
+    if (!isNaN(d.getTime())) return d.getTime();
+  }
+  // fallback: use index as Unix ms
+  return (Date.now() - 86400000) + (typeof value === 'number' ? value * 60000 : 0);
+}
+
+function formatCompact(n) {
+  if (n >= 1e9) return (n/1e9).toFixed(2) + 'B';
+  if (n >= 1e6) return (n/1e6).toFixed(2) + 'M';
+  if (n >= 1e3) return (n/1e3).toFixed(1) + 'K';
+  return n.toFixed(2);
+}
+
 function toggleRaw() {
   const box = document.getElementById('rawBox');
   box.style.display = box.style.display === 'none' ? 'block' : 'none';
 }
 
-function formatNum(n) {
-  if (n >= 1e9) return (n/1e9).toFixed(2) + 'B';
-  if (n >= 1e6) return (n/1e6).toFixed(2) + 'M';
-  if (n >= 1e3) return (n/1e3).toFixed(1) + 'K';
-  return n.toFixed(2);
+// ── Sidebar collapse ──────────────────────────────────────────
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('collapsed');
 }
 
 // ── Explorer ──────────────────────────────────────────────────
@@ -825,9 +1004,8 @@ setInterval(() => {
   if (el && el.textContent !== '--:--:--') el.textContent = new Date().toLocaleTimeString();
 }, 1000);
 
-// ── Init ──────────────────────────────────────────────────────
+// ── Init ───────────────────────────────────────────────────────
 loadRegistry().then(() => {
-  // Load first endpoint
   const first = registry[0];
   if (first) loadEndpoint(first.id);
 });
