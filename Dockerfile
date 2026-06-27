@@ -402,6 +402,7 @@ table.crypto-grid tr:hover td { background: rgba(255,255,255,0.02); }
 @keyframes logic-shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
 .error-fallback { background: var(--bear-dim); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 8px; padding: 16px; color: var(--bear-red); font-family: var(--font-mono); font-size: 12px; }
 .state-empty { text-align: center; padding: 48px; color: var(--text-secondary); font-size: 13px; }
+.chart-fallback { text-align: center; padding: 48px; color: var(--text-muted); font-family: var(--font-mono); font-size: 12px; }
 </style>
 </head>
 <body>
@@ -535,11 +536,8 @@ function executeRouteFilter() {
 function toggleSidebarLayout() {
   parseDom('sidebarNode').classList.toggle('collapsed');
   if(tvChartInstance) {
-    // Force recalculation of chart bounding canvas metrics
-    setTimeout(() => {
-      const parent = document.querySelector('.chart-viewport');
-      if(parent) tvChartInstance.resize(parent.clientWidth, 380);
-    }, 220);
+    // autoSize handles resize automatically in v5
+    setTimeout(() => tvChartInstance.applyOptions({}), 220);
   }
 }
 
@@ -753,59 +751,62 @@ function sortGridColumn(column) {
   targetHeader.classList.add(sortingConfig.direction === 1 ? 'sort-asc' : 'sort-desc');
 }
 
-function mountTradingViewChartEngine(container, sourceData) {
-  const elementWidth = container.clientWidth;
-  
-  // Instantiating High Performance Chart Construct Object Configuration Archetype
-  tvChartInstance = LightweightCharts.createChart(container, {
-    layout: {
-      background: { type: 'solid', color: '#0b1120' },
-      textColor: '#94a3b8',
-      fontFamily: varStyle('--font-mono'),
-    },
-    grid: {
-      vertLines: { color: 'rgba(255, 255, 255, 0.02)' },
-      horzLines: { color: 'rgba(255, 255, 255, 0.02)' },
-    },
-    crosshair: {
-      mode: LightweightCharts.CrosshairMode.Normal,
-      vertLine: { color: 'rgba(240, 180, 41, 0.4)', style: 3, labelBackgroundColor: '#131b2e' },
-      horzLine: { color: 'rgba(240, 180, 41, 0.4)', style: 3, labelBackgroundColor: '#131b2e' },
-    },
-    rightPriceScale: { borderColor: 'rgba(255, 255, 255, 0.05)' },
-    timeScale: { borderColor: 'rgba(255, 255, 255, 0.05)', timeVisible: true, secondsVisible: false },
-    width: elementWidth,
-    height: 380,
-  });
+// Flexible OHLC field detection — works with whatever the API gives us
+function detectOhlcFields(rowKeys) {
+  const map = {};
+  for (const key of rowKeys) {
+    const lower = key.toLowerCase();
+    if (lower === 'open'  || lower === 'o') map.open = key;
+    if (lower === 'high'  || lower === 'h') map.high = key;
+    if (lower === 'low'   || lower === 'l') map.low = key;
+    if (lower === 'close' || lower === 'c') map.close = key;
+  }
+  return map.open && map.high && map.low && map.close ? map : null;
+}
 
+function mountTradingViewChartEngine(container, sourceData) {
   const rowKeys = Object.keys(sourceData[0] || {});
   
-  // Mapping Structural Identification Rules for Core Datatypes (OHLC Vector Rules)
-  const matchingOhlcKeys = ['open', 'high', 'low', 'close'].every(key => rowKeys.some(rk => rk.toLowerCase() === key));
+  // Try flexible OHLC detection first
+  const ohlcMap = detectOhlcFields(rowKeys);
   const detectedTimeToken = rowKeys.find(k => /time|date|timestamp|^t$/i.test(k)) || '';
 
   // Parse, standardise and isolate timestamps to secure ascending linearity order requirement
   let timelineSequence = [];
   
-  if (matchingOhlcKeys) {
-    const ohlcFieldsMap = {
-      open: rowKeys.find(k => k.toLowerCase() === 'open'),
-      high: rowKeys.find(k => k.toLowerCase() === 'high'),
-      low: rowKeys.find(k => k.toLowerCase() === 'low'),
-      close: rowKeys.find(k => k.toLowerCase() === 'close'),
-    };
-    
+  if (ohlcMap) {
     timelineSequence = sourceData.map((record, index) => ({
       time: extractTimelineInteger(record[detectedTimeToken], index, sourceData.length),
-      open: parseFloat(record[ohlcFieldsMap.open] ?? 0),
-      high: parseFloat(record[ohlcFieldsMap.high] ?? 0),
-      low: parseFloat(record[ohlcFieldsMap.low] ?? 0),
-      close: parseFloat(record[ohlcFieldsMap.close] ?? 0),
+      open: parseFloat(record[ohlcMap.open] ?? 0),
+      high: parseFloat(record[ohlcMap.high] ?? 0),
+      low: parseFloat(record[ohlcMap.low] ?? 0),
+      close: parseFloat(record[ohlcMap.close] ?? 0),
     })).filter(item => item.time !== null);
     
-    // Enforce Ascending Time Matrix Ordering to prevent core engine render asset panic bounds failure
+    // Enforce Ascending Time Matrix Ordering
     timelineSequence.sort((a, b) => a.time - b.time);
     
+    // Instantiating High Performance Chart
+    tvChartInstance = LightweightCharts.createChart(container, {
+      layout: {
+        background: { type: 'solid', color: '#0b1120' },
+        textColor: '#94a3b8',
+        fontFamily: varStyle('--font-mono'),
+      },
+      grid: {
+        vertLines: { color: 'rgba(255, 255, 255, 0.02)' },
+        horzLines: { color: 'rgba(255, 255, 255, 0.02)' },
+      },
+      crosshair: {
+        mode: LightweightCharts.CrosshairMode.Normal,
+        vertLine: { color: 'rgba(240, 180, 41, 0.4)', style: 3, labelBackgroundColor: '#131b2e' },
+        horzLine: { color: 'rgba(240, 180, 41, 0.4)', style: 3, labelBackgroundColor: '#131b2e' },
+      },
+      rightPriceScale: { borderColor: 'rgba(255, 255, 255, 0.05)' },
+      timeScale: { borderColor: 'rgba(255, 255, 255, 0.05)', timeVisible: true, secondsVisible: false },
+      autoSize: true,
+    });
+
     tvCandleSeries = tvChartInstance.addSeries(LightweightCharts.CandlestickSeries, {
       upColor: '#22c55e',
       downColor: '#ef4444',
@@ -816,7 +817,7 @@ function mountTradingViewChartEngine(container, sourceData) {
     tvCandleSeries.setData(timelineSequence);
     updateLegendOverlayDisplay(timelineSequence[timelineSequence.length - 1], true);
     
-    // Establish Crosshair Interaction Event Registry Pipeline Loop
+    // Crosshair Interaction
     tvChartInstance.subscribeCrosshairMove(param => {
       if (param.time) {
         const structuralRow = param.seriesData.get(tvCandleSeries);
@@ -827,7 +828,7 @@ function mountTradingViewChartEngine(container, sourceData) {
     });
     
   } else {
-    // Dynamic Linear Vector Fallback Mode Configuration Array Pipeline Target
+    // Fallback: Dynamic Linear Vector for non-OHLC data
     const numericTargetKey = rowKeys.find(k => typeof sourceData[0][k] === 'number' || !isNaN(parseFloat(sourceData[0][k])));
     if (numericTargetKey) {
       timelineSequence = sourceData.map((record, index) => ({
@@ -837,6 +838,26 @@ function mountTradingViewChartEngine(container, sourceData) {
       
       timelineSequence.sort((a, b) => a.time - b.time);
       
+      tvChartInstance = LightweightCharts.createChart(container, {
+        layout: {
+          background: { type: 'solid', color: '#0b1120' },
+          textColor: '#94a3b8',
+          fontFamily: varStyle('--font-mono'),
+        },
+        grid: {
+          vertLines: { color: 'rgba(255, 255, 255, 0.02)' },
+          horzLines: { color: 'rgba(255, 255, 255, 0.02)' },
+        },
+        crosshair: {
+          mode: LightweightCharts.CrosshairMode.Normal,
+          vertLine: { color: 'rgba(240, 180, 41, 0.4)', style: 3, labelBackgroundColor: '#131b2e' },
+          horzLine: { color: 'rgba(240, 180, 41, 0.4)', style: 3, labelBackgroundColor: '#131b2e' },
+        },
+        rightPriceScale: { borderColor: 'rgba(255, 255, 255, 0.05)' },
+        timeScale: { borderColor: 'rgba(255, 255, 255, 0.05)', timeVisible: true, secondsVisible: false },
+        autoSize: true,
+      });
+
       tvLineSeries = tvChartInstance.addSeries(LightweightCharts.AreaSeries, {
         topColor: 'rgba(240, 180, 41, 0.2)',
         bottomColor: 'rgba(240, 180, 41, 0.0)',
@@ -854,6 +875,10 @@ function mountTradingViewChartEngine(container, sourceData) {
           updateLegendOverlayDisplay({ label: numericTargetKey, value: timelineSequence[timelineSequence.length - 1]?.value }, false);
         }
       });
+    } else {
+      // No chartable numeric data
+      container.innerHTML = `<div class="chart-fallback">No chartable time-series data for this endpoint.<br>The datagrid below contains the full payload.</div>`;
+      return;
     }
   }
 
@@ -883,11 +908,9 @@ function updateLegendOverlayDisplay(datasetObject, isOhlcFormat) {
 
 function extractTimelineInteger(rawToken, elementIndex, structuralLength) {
   if (!rawToken) {
-    // Generate linear epoch tracking matrices if time array context bounds return undefined
     return Math.floor(Date.now() / 1000) - (structuralLength - elementIndex) * 60;
   }
   if (typeof rawToken === 'number') {
-    // Structural conversion rule standardizing millisecond timestamps to absolute Unix seconds boundaries
     if (rawToken > 5e11) return Math.floor(rawToken / 1000);
     return rawToken;
   }
