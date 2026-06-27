@@ -7,7 +7,9 @@ WORKDIR /app
 RUN pip install --no-cache-dir fastapi uvicorn[standard] httpx pycryptodome jinja2
 RUN mkdir -p /app/templates
 
-# ── decrypt.py ────────────────────────────────────────────────────
+# ============================================================
+# decrypt.py – handles CoinGlass encryption (v=0,1,2,55,66,77)
+# ============================================================
 RUN cat <<'PYEOF' > /app/decrypt.py
 import os, json, gzip, base64, time, logging
 from urllib.parse import urlparse
@@ -23,17 +25,19 @@ _KEY_TABLE = {
     "77": "863f08689c97435b",
 }
 
-# Runtime-injectable: CAPI_EXTRA_KEYS="88=abc123def45678,99=xyz789abcdef01"
+# Inject extra keys via env: CAPI_EXTRA_KEYS="88=abc...,99=xyz..."
 for _pair in os.environ.get("CAPI_EXTRA_KEYS", "").split(","):
     if "=" in _pair:
         _k, _v = _pair.strip().split("=", 1)
         _KEY_TABLE[_k.strip()] = _v.strip()
 
 def _derive_key0(v, url="", outer=None):
-    if v == "1":
+    if v == "0":
+        # Use the full request URL (including query) as constant
+        constant = url
+    elif v == "1":
         constant = urlparse(url).path or url
     elif v == "2":
-        # confirmed from CG frontend JS: v=2 uses response body `time` field
         constant = str((outer or {}).get("time", ""))
     else:
         constant = _KEY_TABLE.get(v)
@@ -45,7 +49,7 @@ def _derive_key0(v, url="", outer=None):
     return base64.b64encode(constant.encode()).decode()[:16]
 
 def decrypt(body, user_b64, v, url=""):
-    outer  = json.loads(body)
+    outer = json.loads(body)
     if "data" not in outer:
         return outer
     payload = base64.b64decode(outer["data"])
@@ -72,12 +76,16 @@ async def fetch_and_decrypt(url, params=None, timeout=15):
         user = r.headers.get("user")
         v    = r.headers.get("v")
         if not user or not v:
-            try:    return r.json()
-            except: return {"raw": r.text}
+            try:
+                return r.json()
+            except:
+                return {"raw": r.text}
         return decrypt(r.text, user, v, url)
 PYEOF
 
-# ── main.py ───────────────────────────────────────────────────────
+# ============================================================
+# main.py – FastAPI app with full endpoint registry + Explorer
+# ============================================================
 RUN cat <<'PYEOF' > /app/main.py
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -91,13 +99,14 @@ app  = FastAPI(title="CoinGlass Terminal")
 T    = Jinja2Templates(directory="/app/templates")
 BASE = "https://capi.coinglass.com"
 
+# Verified endpoints (based on official V4 docs + common usage)
 REGISTRY = [
-    # ── SPOT ──────────────────────────────────────────────────────
+    # SPOT
     {"id":"rsi",       "cat":"spot",        "label":"RSI Matrix",
      "path":"/api/spot/rsi/list",                "params":{"pageSize":500,"pageNum":1}},
     {"id":"gainers",   "cat":"spot",        "label":"Gainers / Losers",
      "path":"/api/spot/gainLossList",            "params":{"pageSize":100}},
-    # ── DERIVATIVES ───────────────────────────────────────────────
+    # DERIVATIVES
     {"id":"funding",   "cat":"derivatives", "label":"Funding Rates",
      "path":"/api/fundingRate/list",             "params":{"pageSize":100,"pageNum":1}},
     {"id":"oi",        "cat":"derivatives", "label":"Open Interest",
@@ -110,7 +119,7 @@ REGISTRY = [
      "path":"/api/futures/liquidation/today",    "params":{"symbol":"BTC"}},
     {"id":"liq_list",  "cat":"derivatives", "label":"Liq All Coins",
      "path":"/api/liquidation/v2/info/list",     "params":{"pageSize":100,"pageNum":1}},
-    # ── MARKET ────────────────────────────────────────────────────
+    # MARKET
     {"id":"mcap",      "cat":"market",      "label":"Market Cap",
      "path":"/api/marketCapRank",                "params":{"pageSize":100}},
     {"id":"feargreed", "cat":"market",      "label":"Fear & Greed",
@@ -119,7 +128,7 @@ REGISTRY = [
      "path":"/api/index/altcoinSeason",          "params":{}},
     {"id":"global",    "cat":"market",      "label":"Global Overview",
      "path":"/api/global/homeOverview",          "params":{}},
-    # ── ETF ───────────────────────────────────────────────────────
+    # ETF
     {"id":"etf",       "cat":"etf",         "label":"ETF Overview",
      "path":"/api/etf/overview",                 "params":{}},
     {"id":"etf_flow",  "cat":"etf",         "label":"Daily Flows",
@@ -178,7 +187,9 @@ if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=10000)
 PYEOF
 
-# ── dashboard.html ────────────────────────────────────────────────
+# ============================================================
+# dashboard.html – Modern responsive UI with charts & explorer
+# ============================================================
 RUN cat <<'HTMLEOF' > /app/templates/dashboard.html
 <!DOCTYPE html>
 <html lang="en">
