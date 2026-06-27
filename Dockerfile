@@ -188,7 +188,7 @@ if __name__ == "__main__":
 PYEOF
 
 # ============================================================
-# dashboard.html – Complete UI remastered with candlestick charts
+# dashboard.html – Complete UI overhaul (UI/UX PRO Institutional Terminal)
 # ============================================================
 RUN cat <<'HTMLEOF' > /app/templates/dashboard.html
 <!DOCTYPE html>
@@ -196,819 +196,802 @@ RUN cat <<'HTMLEOF' > /app/templates/dashboard.html
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CoinGlass Terminal</title>
+<title>CoinGlass Terminal PRO</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 <style>
 :root {
-  --bg: #060b16;
-  --surface: #0c1325;
-  --surface2: #101b30;
-  --border: rgba(255,255,255,0.06);
-  --accent: #f0b429;
-  --accent-dim: rgba(240,180,41,0.12);
-  --blue: #4f9fff;
-  --green: #3ddc84;
-  --red: #ff4d6d;
-  --text: #b4c2e0;
-  --text-bright: #e5edff;
-  --muted: #4a5b7a;
-  --radius: 14px;
-  --transition: 0.2s ease;
+  --bg-main: #060913;
+  --bg-surface: #0b1120;
+  --bg-surface-elevated: #131b2e;
+  --border-primary: rgba(255, 255, 255, 0.05);
+  --border-focus: #3b82f6;
+  --brand-accent: #f0b429;
+  --brand-accent-dim: rgba(240, 180, 41, 0.08);
+  
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted: #475569;
+  
+  --bull-green: #22c55e;
+  --bear-red: #ef4444;
+  --bull-dim: rgba(34, 197, 94, 0.1);
+  --bear-dim: rgba(239, 68, 68, 0.1);
+  
+  --font-sans: 'Plus Jakarta Sans', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --sidebar-width: 260px;
+  --sidebar-collapsed-width: 60px;
+  --topbar-height: 48px;
 }
-* { margin:0; padding:0; box-sizing:border-box }
+
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-font-smoothing: antialiased; }
 body {
-  background: var(--bg);
-  color: var(--text);
-  font-family: 'Inter', sans-serif;
-  font-size: 13px;
+  background: var(--bg-main);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 12px;
   height: 100vh;
   overflow: hidden;
 }
-::-webkit-scrollbar { width: 5px; height: 5px; }
-::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 10px; }
+
+/* Custom Scrollbars */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-thumb { background: var(--text-muted); border-radius: 2px; }
 ::-webkit-scrollbar-track { background: transparent; }
 
-.shell { display: flex; height: 100vh; }
+.app-container { display: flex; height: 100vh; width: 100vw; }
 
+/* Sidebar Navigation */
 .sidebar {
-  width: 220px;
+  width: var(--sidebar-width);
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border-primary);
+  display: flex;
+  flex-direction: column;
   flex-shrink: 0;
-  background: var(--surface);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-  padding-bottom: 16px;
-  transition: width var(--transition);
+  transition: width 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 20;
 }
-.sidebar.collapsed { width: 48px; }
+.sidebar.collapsed { width: var(--sidebar-collapsed-width); }
 
-.main {
-  flex: 1;
+.sidebar-header {
+  height: var(--topbar-height);
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border-primary);
+  gap: 12px;
   overflow: hidden;
 }
+.brand-icon {
+  width: 26px; height: 26px; background: var(--brand-accent); border-radius: 6px;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.brand-icon svg { width: 14px; height: 14px; fill: var(--bg-main); }
+.brand-meta { transition: opacity 0.15s ease; white-space: nowrap; }
+.brand-meta h1 { font-size: 14px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.3px; line-height: 1.2; }
+.brand-meta span { font-family: var(--font-mono); font-size: 9px; color: var(--brand-accent); font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
+.sidebar.collapsed .brand-meta { opacity: 0; pointer-events: none; }
 
+.search-container { padding: 10px 12px; border-bottom: 1px solid var(--border-primary); }
+.sidebar.collapsed .search-container { display: none; }
+.search-wrapper { position: relative; }
+.search-wrapper input {
+  width: 100%; background: var(--bg-main); border: 1px solid var(--border-primary);
+  border-radius: 6px; padding: 6px 10px; color: var(--text-primary);
+  font-family: var(--font-sans); font-size: 11px; outline: none; transition: all 0.15s;
+}
+.search-wrapper input:focus { border-color: var(--border-focus); background: var(--bg-surface-elevated); }
+
+.nav-scroll { flex: 1; overflow-y: auto; padding: 8px 0; }
+.nav-group { margin-bottom: 12px; }
+.nav-group-header {
+  padding: 6px 16px; font-size: 9px; font-weight: 700; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 1.5px; display: flex; align-items: center;
+  justify-content: space-between; cursor: pointer; user-select: none;
+}
+.nav-group-header:hover { color: var(--text-secondary); }
+.nav-group-header .chevron { font-family: var(--font-mono); font-size: 8px; transition: transform 0.2s; }
+.nav-group.collapsed .chevron { transform: rotate(-90deg); }
+.nav-group.collapsed .nav-items { display: none; }
+
+.sidebar.collapsed .nav-group-header { display: none; }
+
+.nav-item {
+  display: flex; align-items: center; padding: 7px 16px; font-size: 12px; font-weight: 500;
+  color: var(--text-secondary); cursor: pointer; border-left: 2px solid transparent;
+  transition: all 0.15s ease; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.nav-item:hover { background: rgba(255,255,255,0.02); color: var(--text-primary); }
+.nav-item.active { background: var(--brand-accent-dim); color: var(--brand-accent); border-left-color: var(--brand-accent); font-weight: 600; }
+.nav-item .node-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--text-muted); margin-right: 10px; flex-shrink: 0; }
+.nav-item.active .node-dot { background: var(--brand-accent); }
+.nav-item .param-count { margin-left: auto; font-family: var(--font-mono); font-size: 9px; background: rgba(255,255,255,0.04); padding: 1px 5px; border-radius: 4px; color: var(--text-muted); }
+.sidebar.collapsed .nav-item { padding: 12px 0; justify-content: center; }
+.sidebar.collapsed .nav-item span:not(.node-dot) { display: none; }
+.sidebar.collapsed .nav-item .node-dot { margin-right: 0; width: 6px; height: 6px; }
+
+/* Main Workspace Floor */
+.workspace { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-main); }
+
+/* Control Topbar */
 .topbar {
-  height: 46px;
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 0 20px;
-  background: rgba(6,11,22,0.9);
-  backdrop-filter: blur(10px);
-  z-index: 5;
+  height: var(--topbar-height); background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-primary); display: flex;
+  align-items: center; padding: 0 20px; gap: 16px; flex-shrink: 0;
 }
+.sidebar-toggle { background: transparent; border: none; color: var(--text-secondary); cursor: pointer; padding: 4px; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+.sidebar-toggle:hover { color: var(--text-primary); }
+.endpoint-badge { font-family: var(--font-mono); background: var(--bg-surface-elevated); border: 1px solid var(--border-primary); padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; color: var(--text-primary); }
+.sys-status { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 10px; font-weight: 600; color: var(--bull-green); margin-left: auto; }
+.status-pulse { width: 6px; height: 6px; background: var(--bull-green); border-radius: 50%; box-shadow: 0 0 8px var(--bull-green); animation: pulse 2s infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+.timestamp-clock { font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary); border-left: 1px solid var(--border-primary); padding-left: 16px; }
+.btn-refresh { background: var(--bg-surface-elevated); border: 1px solid var(--border-primary); color: var(--text-primary); padding: 4px 10px; border-radius: 4px; font-family: var(--font-sans); font-size: 11px; font-weight: 500; cursor: pointer; transition: all 0.15s; display: flex; align-items: center; gap: 4px; }
+.btn-refresh:hover { border-color: var(--text-secondary); }
 
-.sb-logo {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 14px 14px 10px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-  transition: all var(--transition);
-}
-.collapsed .sb-logo { justify-content: center; padding: 14px 8px; }
-.sb-logo-text { overflow: hidden; white-space: nowrap; transition: opacity var(--transition); }
-.collapsed .sb-logo-text { opacity: 0; width: 0; }
-.sb-logo-text span { font-weight: 700; font-size: 15px; color: var(--text-bright); letter-spacing: -0.3px; }
-.sb-logo-text small { font-family: 'JetBrains Mono', monospace; font-size: 9px; color: var(--accent); letter-spacing: 0.1em; text-transform: uppercase; }
+/* Main Dynamic Viewport */
+.viewport-content { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
 
-.sb-search {
-  padding: 8px 14px;
-  border-bottom: 1px solid var(--border);
-  transition: all var(--transition);
-}
-.collapsed .sb-search { padding: 8px 6px; }
-.sb-search input {
-  width: 100%;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 6px 10px;
-  color: var(--text-bright);
-  font-family: 'Inter', sans-serif;
-  font-size: 11px;
-  outline: none;
-  transition: border-color var(--transition);
-}
-.sb-search input:focus { border-color: var(--accent); }
-.collapsed .sb-search input { display: none; }
+/* Metric Strips */
+.ticker-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.ticker-card { background: var(--bg-surface); border: 1px solid var(--border-primary); border-radius: 8px; padding: 12px 16px; position: relative; overflow: hidden; }
+.ticker-card .label { font-size: 10px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+.ticker-card .value { font-family: var(--font-mono); font-size: 20px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.5px; }
+.ticker-card .subtext { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.sb-cat {
-  padding: 14px 14px 4px;
-  font-size: 9px;
-  font-weight: 700;
-  color: var(--muted);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  transition: color var(--transition);
-}
-.sb-cat:hover { color: var(--text); }
-.sb-cat .arrow {
-  font-size: 8px;
-  transition: transform var(--transition);
-  display: inline-block;
-}
-.sb-cat.collapsed .arrow { transform: rotate(-90deg); }
-.collapsed .sb-cat { padding: 14px 8px 4px; justify-content: center; }
-.collapsed .sb-cat span:not(.arrow) { display: none; }
-.sb-items { overflow: hidden; transition: max-height 0.25s ease, opacity 0.2s; }
-.sb-items.hidden { max-height: 0; opacity: 0; }
+/* Grid Dashboard Layer */
+.pane-layout { display: grid; grid-template-columns: 1fr; gap: 16px; }
+@media(min-width: 1200px) { .pane-layout { grid-template-columns: 3fr 2fr; } }
 
-.sb-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 14px;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text);
-  border-left: 2px solid transparent;
-  cursor: pointer;
-  transition: all var(--transition);
-  user-select: none;
-  overflow: hidden;
-  white-space: nowrap;
-}
-.sb-item:hover { background: rgba(255,255,255,0.03); color: var(--text-bright); }
-.sb-item.active { color: var(--accent); border-left-color: var(--accent); background: var(--accent-dim); }
-.sb-item .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); flex-shrink: 0; transition: background var(--transition); }
-.sb-item.active .dot { background: var(--accent); }
-.sb-item .badge {
-  margin-left: auto;
-  background: rgba(255,255,255,0.05);
-  padding: 0 8px;
-  border-radius: 10px;
-  font-size: 9px;
-  color: var(--muted);
-  font-weight: 600;
-}
-.collapsed .sb-item { justify-content: center; padding: 10px 6px; }
-.collapsed .sb-item span:not(.dot) { display: none; }
+.panel-node { background: var(--bg-surface); border: 1px solid var(--border-primary); border-radius: 8px; display: flex; flex-direction: column; overflow: hidden; }
+.panel-header { padding: 10px 16px; border-bottom: 1px solid var(--border-primary); display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.01); }
+.panel-header h3 { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.5px; }
 
-.tb-status { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--green); font-weight: 500; }
-.tb-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
-@keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:0.35 } }
-.tb-chip { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--muted); }
-.tb-chip b { color: var(--text-bright); font-weight: 500; }
-.tb-time { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--muted); margin-left: auto; }
-.tb-refresh {
-  padding: 4px 12px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-size: 11px;
-  color: var(--muted);
-  background: transparent;
-  cursor: pointer;
-  transition: all var(--transition);
-}
-.tb-refresh:hover { border-color: var(--accent); color: var(--accent); }
-.tb-toggle-sidebar {
-  margin-left: auto;
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--muted);
-  padding: 4px 8px;
-  font-size: 14px;
-  cursor: pointer;
-  transition: all var(--transition);
-  line-height: 1;
-}
-.tb-toggle-sidebar:hover { border-color: var(--accent); color: var(--accent); }
+/* TradingView Chart Customizations */
+.chart-viewport { height: 380px; width: 100%; position: relative; background: var(--bg-surface); }
+.chart-overlay-legend { position: absolute; top: 12px; left: 16px; z-index: 10; font-family: var(--font-mono); font-size: 11px; pointer-events: none; display: flex; flex-direction: column; gap: 2px; }
+.legend-row-main { display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--text-primary); }
+.legend-ohlc { display: flex; gap: 8px; font-size: 10px; color: var(--text-secondary); margin-top: 2px; }
+.legend-val { color: var(--brand-accent); }
 
-.content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 20px 24px 32px;
+/* High Performance Data Table */
+.table-container { overflow: hidden; width: 100%; }
+.table-scroll { overflow: auto; max-height: 380px; position: relative; }
+table.crypto-grid { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 11px; font-family: var(--font-sans); text-align: left; }
+table.crypto-grid th {
+  position: sticky; top: 0; background: var(--bg-surface-elevated); padding: 8px 12px;
+  font-family: var(--font-sans); font-size: 10px; font-weight: 600; color: var(--text-secondary);
+  text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border-primary);
+  cursor: pointer; user-select: none; z-index: 2; white-space: nowrap;
 }
+table.crypto-grid th:hover { color: var(--text-primary); background: rgba(255,255,255,0.04); }
+table.crypto-grid th.sort-asc::after { content: " ⬆"; font-size: 8px; color: var(--brand-accent); }
+table.crypto-grid th.sort-desc::after { content: " ⬇"; font-size: 8px; color: var(--brand-accent); }
+table.crypto-grid td { padding: 7px 12px; border-bottom: 1px solid var(--border-primary); color: var(--text-primary); white-space: nowrap; font-family: var(--font-mono); font-size: 11px; }
+table.crypto-grid tr:hover td { background: rgba(255,255,255,0.02); }
 
-.card {
-  background: rgba(14,20,40,0.85);
-  backdrop-filter: blur(4px);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 18px 20px;
-  margin-bottom: 16px;
-}
-.card-title {
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--muted);
-  margin-bottom: 10px;
-}
+/* UI Component Utilities */
+.trend-up { color: var(--bull-green) !important; }
+.trend-down { color: var(--bear-red) !important; }
+.badge-ui { display: inline-block; padding: 2px 6px; border-radius: 4px; font-family: var(--font-mono); font-size: 10px; font-weight: 600; }
+.badge-up { background: var(--bull-dim); color: var(--bull-green); }
+.badge-down { background: var(--bear-dim); color: var(--bear-red); }
 
-.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-bottom: 18px; }
-.stat-box {
-  background: rgba(255,255,255,0.02);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px 14px;
-}
-.stat-box .label { font-size: 9px; font-weight: 600; text-transform: uppercase; color: var(--muted); letter-spacing: 0.06em; margin-bottom: 4px; }
-.stat-box .value { font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 600; color: var(--text-bright); }
-.stat-box .sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+/* JSON Inspect Element */
+.inspector-toggle { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary); cursor: pointer; padding: 8px 0; border-top: 1px solid var(--border-primary); margin-top: 8px; user-select: none; }
+.inspector-toggle:hover { color: var(--text-primary); }
+.inspector-pre { background: #04060b; border: 1px solid var(--border-primary); border-radius: 6px; padding: 12px; font-family: var(--font-mono); font-size: 11px; color: #64748b; max-height: 250px; overflow: auto; display: none; margin-top: 4px; }
 
-.chart-container { height: 300px; position: relative; margin-bottom: 16px; }
-.chart-container canvas { border-radius: var(--radius); }
+/* Advanced API Custom Tool Explorer */
+.explorer-panel { background: var(--bg-surface); border: 1px solid var(--border-primary); border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.form-row { display: grid; grid-template-columns: 1fr; gap: 12px; }
+@media(min-width: 768px) { .form-row { grid-template-columns: 2fr 3fr; } }
+.field-group { display: flex; flex-direction: column; gap: 4px; }
+.field-group label { font-size: 10px; font-weight: 600; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.5px; }
+.field-group input, .field-group textarea { background: var(--bg-main); border: 1px solid var(--border-primary); border-radius: 6px; padding: 8px 12px; color: var(--text-primary); font-family: var(--font-mono); font-size: 12px; outline: none; transition: border-color 0.15s; }
+.field-group input:focus, .field-group textarea:focus { border-color: var(--border-focus); }
+.field-group textarea { min-height: 54px; resize: vertical; }
+.btn-submit { background: var(--brand-accent); color: var(--bg-main); font-family: var(--font-sans); font-size: 12px; font-weight: 600; padding: 8px 20px; border: none; border-radius: 6px; cursor: pointer; align-self: flex-start; transition: opacity 0.15s; }
+.btn-submit:hover { opacity: 0.9; }
 
-.table-wrap {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-  margin-bottom: 16px;
-}
-.table-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--border);
-}
-.table-head .title { font-weight: 600; font-size: 12px; color: var(--text-bright); }
-.table-head .meta { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--muted); }
-.table-scroll { overflow-x: auto; max-height: 400px; overflow-y: auto; }
-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-thead th {
-  position: sticky;
-  top: 0;
-  background: rgba(7,11,20,0.97);
-  backdrop-filter: blur(8px);
-  padding: 8px 12px;
-  font-size: 9px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-  text-align: left;
-  white-space: nowrap;
-  cursor: pointer;
-  user-select: none;
-  transition: color var(--transition);
-}
-thead th:hover { color: var(--text); }
-thead th.sorted-asc::after { content: " ↑"; color: var(--accent); }
-thead th.sorted-desc::after { content: " ↓"; color: var(--accent); }
-tbody td { padding: 7px 12px; border-bottom: 1px solid rgba(255,255,255,0.03); }
-tbody tr:last-child td { border-bottom: none; }
-tbody tr:hover td { background: rgba(255,255,255,0.02); }
-
-.badge {
-  display: inline-block;
-  padding: 1px 8px;
-  border-radius: 4px;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-.bg-red { background: rgba(255,77,109,0.15); color: var(--red); }
-.bg-green { background: rgba(61,220,132,0.15); color: var(--green); }
-.bg-neutral { background: rgba(255,255,255,0.05); color: var(--muted); }
-.bg-accent { background: var(--accent-dim); color: var(--accent); }
-
-.raw-toggle {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  color: var(--muted);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 8px 0;
-  border-top: 1px solid var(--border);
-  margin-top: 10px;
-  transition: color var(--transition);
-}
-.raw-toggle:hover { color: var(--accent); }
-.raw-box {
-  background: rgba(0,0,0,0.5);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
-  color: var(--muted);
-  max-height: 300px;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-all;
-  margin-top: 6px;
-  display: none;
-}
-
-.explorer-card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 20px;
-  margin-bottom: 16px;
-}
-.explorer-card label { font-size: 9px; font-weight: 600; text-transform: uppercase; color: var(--muted); letter-spacing: 0.08em; display: block; margin-bottom: 4px; }
-.explorer-card input, .explorer-card textarea {
-  width: 100%;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 8px 12px;
-  color: var(--text-bright);
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
-  outline: none;
-  transition: border-color var(--transition);
-  margin-bottom: 12px;
-}
-.explorer-card input:focus, .explorer-card textarea:focus { border-color: var(--accent); }
-.explorer-card textarea { min-height: 60px; resize: vertical; }
-.explorer-btn {
-  padding: 8px 20px;
-  background: var(--accent);
-  color: #000;
-  font-weight: 600;
-  font-size: 12px;
-  border-radius: 8px;
-  border: none;
-  cursor: pointer;
-  transition: opacity var(--transition);
-}
-.explorer-btn:hover { opacity: 0.85; }
-.chip-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.chip {
-  padding: 4px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 9px;
-  color: var(--muted);
-  cursor: pointer;
-  transition: all var(--transition);
-}
-.chip:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
-
-.skeleton {
-  background: linear-gradient(90deg, rgba(255,255,255,0.02) 25%, rgba(255,255,255,0.06) 50%, rgba(255,255,255,0.02) 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.5s infinite;
-  border-radius: 8px;
-}
-@keyframes shimmer { 0% { background-position: -200% 0 } 100% { background-position: 200% 0 } }
-
-.error-box { background: rgba(255,77,109,0.08); border: 1px solid rgba(255,77,109,0.2); border-radius: 10px; padding: 14px 16px; color: var(--red); font-family: 'JetBrains Mono', monospace; font-size: 12px; margin-bottom: 14px; }
-.error-box strong { display: block; font-weight: 600; margin-bottom: 4px; }
-.empty-state { text-align: center; padding: 40px 20px; color: var(--muted); }
-.empty-state .icon { font-size: 28px; margin-bottom: 8px; }
-
-@media (max-width: 768px) {
-  .sidebar { width: 48px; }
-  .sb-logo-text, .sb-cat span:not(.arrow), .sb-item span { display: none; }
-  .sb-item { padding: 10px 6px; justify-content: center; }
-}
+/* Skeletons & States */
+.shimmer-state { background: linear-gradient(90deg, rgba(255,255,255,0.01) 25%, rgba(255,255,255,0.04) 50%, rgba(255,255,255,0.01) 75%); background-size: 200% 100%; animation: logic-shimmer 1.5s infinite; border-radius: 6px; }
+@keyframes logic-shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+.error-fallback { background: var(--bear-dim); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 8px; padding: 16px; color: var(--bear-red); font-family: var(--font-mono); font-size: 12px; }
+.state-empty { text-align: center; padding: 48px; color: var(--text-secondary); font-size: 13px; }
 </style>
 </head>
 <body>
-<div class="shell">
-  <nav class="sidebar" id="sidebar">
-    <div class="sb-logo">
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-        <rect width="24" height="24" rx="6" fill="#f0b429"/>
-        <path d="M12 3L4 13h6v8l8-10h-6V3z" fill="#060b16"/>
-      </svg>
-      <div class="sb-logo-text">
-        <span>CoinGlass</span><br><small>Terminal</small>
+
+<div class="app-container">
+  <aside class="sidebar" id="sidebarNode">
+    <div class="sidebar-header">
+      <div class="brand-icon">
+        <svg viewBox="0 0 24 24">
+          <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/>
+        </svg>
+      </div>
+      <div class="brand-meta">
+        <h1>CoinGlass</h1>
+        <span>Terminal.PRO</span>
       </div>
     </div>
-    <div class="sb-search">
-      <input type="text" placeholder="Filter endpoints..." id="searchInput" oninput="filterSidebar()">
+    <div class="search-container">
+      <div class="search-wrapper">
+        <input type="text" placeholder="Search structures..." id="searchRoute" oninput="executeRouteFilter()">
+      </div>
     </div>
-    <div id="sidebar-nav"></div>
-  </nav>
-  <div class="main">
+    <div class="nav-scroll" id="sidebarNavFloor"></div>
+  </aside>
+
+  <main class="workspace">
     <div class="topbar">
-      <div class="tb-status"><span class="tb-dot"></span>LIVE</div>
-      <div class="tb-chip" id="tbCount"></div>
-      <div class="tb-chip" id="tbPanel">Select endpoint</div>
-      <div class="tb-time" id="tbTime">--:--:--</div>
-      <button class="tb-refresh" onclick="refresh()">↻ Refresh</button>
-      <button class="tb-toggle-sidebar" onclick="toggleSidebar()">☰</button>
-    </div>
-    <div class="content" id="content">
-      <div class="empty-state">
-        <div class="icon">📊</div>
-        <div>Select an endpoint from the sidebar to load data</div>
+      <button class="sidebar-toggle" onclick="toggleSidebarLayout()">☰</button>
+      <div class="endpoint-badge" id="currentPanelLabel">Initialize</div>
+      
+      <div class="sys-status">
+        <span class="status-pulse"></span>
+        <span>ENGINE ONLINE</span>
       </div>
+      <div class="timestamp-clock" id="clockFloor">--:--:--</div>
+      <button class="btn-refresh" onclick="triggerManualReconstruct()">↻ Execution Refresh</button>
     </div>
-  </div>
+
+    <div class="viewport-content" id="viewportMainFloor">
+      <div class="state-empty">Select endpoint array to map and evaluate matrix context.</div>
+    </div>
+  </main>
 </div>
 
 <script>
-const $ = id => document.getElementById(id);
-let currentId = null;
-let registry = [];
-let chartInstance = null;
-let chartSeries = null;
+const parseDom = id => document.getElementById(id);
+let activeId = null;
+let dataRegistry = [];
+let tvChartInstance = null;
+let tvCandleSeries = null;
+let tvLineSeries = null;
+let sortingConfig = { column: null, direction: 1 };
 
-// ── Fetch registry & build sidebar ────────────────────────────
-async function loadRegistry() {
-  const r = await fetch('/api/registry');
-  const j = await r.json();
-  registry = j.endpoints;
-  buildSidebar();
-}
-
-function buildSidebar() {
-  const cats = {};
-  registry.forEach(e => {
-    if (!cats[e.cat]) cats[e.cat] = [];
-    cats[e.cat].push(e);
-  });
-  const sidebarNav = document.getElementById('sidebar-nav');
-  let html = '';
-  for (const [cat, items] of Object.entries(cats)) {
-    html += `<div class="sb-cat" onclick="toggleCategory(this)">
-      <span class="arrow">▾</span><span>${cat}</span>
-    </div>
-    <div class="sb-items" data-cat="${cat}">`;
-    items.forEach(e => {
-      html += `<div class="sb-item" data-id="${e.id}" data-cat="${cat}" onclick="loadEndpoint('${e.id}')">
-        <span class="dot"></span>
-        <span>${e.label}</span>
-        <span class="badge">${Object.keys(e.params || {}).length}</span>
-      </div>`;
-    });
-    html += `</div>`;
-  }
-  // Explorer entry
-  html += `<div class="sb-cat" onclick="toggleCategory(this)"><span class="arrow">▾</span><span>Tools</span></div>
-    <div class="sb-items" data-cat="Tools">
-      <div class="sb-item" data-id="explorer" onclick="showExplorer()">
-        <span class="dot" style="background:var(--accent)"></span>
-        <span>API Explorer</span>
-      </div>
-    </div>`;
-  sidebarNav.innerHTML = html;
-  // Collapse all categories by default (or expand first)
-  document.querySelectorAll('.sb-cat').forEach(catEl => toggleCategory(catEl, false));
-  // Expand first category
-  const firstCat = document.querySelector('.sb-cat');
-  if (firstCat) toggleCategory(firstCat, true);
-}
-
-function toggleCategory(el, force = null) {
-  const items = el.nextElementSibling;
-  if (!items || !items.classList.contains('sb-items')) return;
-  const isHidden = items.classList.contains('hidden');
-  if (force === true || (force === null && isHidden)) {
-    items.classList.remove('hidden');
-    el.classList.remove('collapsed');
-  } else {
-    items.classList.add('hidden');
-    el.classList.add('collapsed');
-  }
-}
-
-function filterSidebar() {
-  const q = document.getElementById('searchInput').value.toLowerCase();
-  document.querySelectorAll('.sb-item').forEach(el => {
-    const text = el.textContent.toLowerCase();
-    el.style.display = text.includes(q) ? '' : 'none';
-  });
-}
-
-function setActive(id) {
-  document.querySelectorAll('.sb-item').forEach(el => el.classList.remove('active'));
-  const active = document.querySelector(`.sb-item[data-id="${id}"]`);
-  if (active) active.classList.add('active');
-}
-
-// ── Navigation & Data Fetch ───────────────────────────────────
-function loadEndpoint(id) {
-  currentId = id;
-  setActive(id);
-  const ep = registry.find(e => e.id === id);
-  if (!ep) return;
-  document.getElementById('tbPanel').textContent = ep.label;
-  fetchData(id);
-}
-
-function refresh() {
-  if (currentId && currentId !== 'explorer') loadEndpoint(currentId);
-}
-
-async function fetchData(id) {
-  const content = document.getElementById('content');
-  content.innerHTML = skeletonHTML();
+// Core Router Init
+async function instantiateTerminalInfrastructure() {
   try {
-    const r = await fetch('/api/' + id);
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const j = await r.json();
-    document.getElementById('tbTime').textContent = new Date().toLocaleTimeString();
-    if (!j.success) throw new Error(j.error || 'Unknown error');
-    renderData(j.data, j.extracted || []);
-  } catch (e) {
-    content.innerHTML = `<div class="error-box"><strong>Error</strong>${e.message}</div>`;
+    const res = await fetch('/api/registry');
+    const json = await res.json();
+    dataRegistry = json.endpoints;
+    constructNavigationTree();
+    
+    // Auto-load prime data node if registration holds array structure
+    if (dataRegistry.length > 0) {
+      evaluateDataNode(dataRegistry[0].id);
+    }
+  } catch (err) {
+    parseDom('viewportMainFloor').innerHTML = `<div class="error-fallback">System Fault Instantiating Registry Mapping Matrix: ${err.message}</div>`;
   }
 }
 
-function skeletonHTML() {
-  return `
-    <div class="stats-grid">
-      ${Array(3).fill('<div class="stat-box skeleton" style="height:60px"></div>').join('')}
+function constructNavigationTree() {
+  const dictionary = {};
+  dataRegistry.forEach(node => {
+    if (!dictionary[node.cat]) dictionary[node.cat] = [];
+    dictionary[node.cat].push(node);
+  });
+  
+  let structuralHtml = '';
+  for (const [category, routes] of Object.entries(dictionary)) {
+    structuralHtml += `
+      <div class="nav-group" data-group-cat="${category}">
+        <div class="nav-group-header" onclick="toggleCategoryGroup(this)">
+          <span>${category}</span>
+          <span class="chevron">▼</span>
+        </div>
+        <div class="nav-items">
+    `;
+    routes.forEach(route => {
+      structuralHtml += `
+        <div class="nav-item" data-route-id="${route.id}" onclick="evaluateDataNode('${route.id}')">
+          <span class="node-dot"></span>
+          <span>${route.label}</span>
+          <span class="param-count">${Object.keys(route.params || {}).length}</span>
+        </div>
+      `;
+    });
+    structuralHtml += `</div></div>`;
+  }
+  
+  // Custom Execution Layer Injection
+  structuralHtml += `
+    <div class="nav-group" data-group-cat="Tools">
+      <div class="nav-group-header" onclick="toggleCategoryGroup(this)">
+        <span>Core Engine Tools</span>
+        <span class="chevron">▼</span>
+      </div>
+      <div class="nav-items">
+        <div class="nav-item" data-route-id="api_explorer" onclick="renderDynamicExplorer()">
+          <span class="node-dot" style="background:var(--brand-accent)"></span>
+          <span>API Matrix Explorer</span>
+        </div>
+      </div>
     </div>
-    <div class="card skeleton" style="height:280px;margin-bottom:16px"></div>
-    <div class="table-wrap skeleton" style="height:260px"></div>
+  `;
+  
+  parseDom('sidebarNavFloor').innerHTML = structuralHtml;
+}
+
+function toggleCategoryGroup(element) {
+  element.parentElement.classList.toggle('collapsed');
+}
+
+function executeRouteFilter() {
+  const query = parseDom('searchRoute').value.toLowerCase();
+  document.querySelectorAll('.nav-item').forEach(item => {
+    const stringContext = item.textContent.toLowerCase();
+    item.style.display = stringContext.includes(query) ? 'flex' : 'none';
+  });
+}
+
+function toggleSidebarLayout() {
+  parseDom('sidebarNode').classList.toggle('collapsed');
+  if(tvChartInstance) {
+    // Force recalculation of chart bounding canvas metrics
+    setTimeout(() => {
+      const parent = document.querySelector('.chart-viewport');
+      if(parent) tvChartInstance.resize(parent.clientWidth, 380);
+    }, 220);
+  }
+}
+
+function evaluateDataNode(id) {
+  activeId = id;
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+  const activeTarget = document.querySelector(`.nav-item[data-route-id="${id}"]`);
+  if (activeTarget) activeTarget.classList.add('active');
+  
+  const entity = dataRegistry.find(item => item.id === id);
+  parseDom('currentPanelLabel').textContent = entity ? entity.label : "API Matrix Explorer";
+  
+  executeNodeFetch(id);
+}
+
+function triggerManualReconstruct() {
+  if (activeId && activeId !== 'api_explorer') evaluateDataNode(activeId);
+}
+
+async function executeNodeFetch(id) {
+  const targetFloor = parseDom('viewportMainFloor');
+  targetFloor.innerHTML = renderSystemSkeletons();
+  
+  try {
+    const response = await fetch(`/api/${id}`);
+    if (!response.ok) throw new Error(`Network Stream Fault Status: ${response.status}`);
+    const networkPayload = await response.json();
+    
+    if (!networkPayload.success) throw new Error(networkPayload.error || 'System Fault Evaluated Matrix Payload Exception');
+    
+    renderMatrixInterface(networkPayload.data, networkPayload.extracted || []);
+  } catch (err) {
+    targetFloor.innerHTML = `<div class="error-fallback"><strong>Execution Engine Exception</strong>${err.message}</div>`;
+  }
+}
+
+function renderSystemSkeletons() {
+  return `
+    <div class="ticker-grid">
+      ${Array(4).fill('<div class="ticker-card shimmer-state" style="height:64px"></div>').join('')}
+    </div>
+    <div class="pane-layout">
+      <div class="panel-node shimmer-state" style="height:420px"></div>
+      <div class="panel-node shimmer-state" style="height:420px"></div>
+    </div>
   `;
 }
 
-// ── Data Rendering ────────────────────────────────────────────
-function renderData(data, extracted) {
-  const list = extracted.length ? extracted : (Array.isArray(data) ? data : []);
-  // Stats
-  let stats = [];
-  if (list.length) {
-    const keys = Object.keys(list[0] || {}).filter(k => typeof list[0][k] === 'number' || !isNaN(parseFloat(list[0][k])));
-    const chosen = keys.slice(0, 4);
-    chosen.forEach(k => {
-      const values = list.map(item => {
-        const v = parseFloat(item[k]);
-        return isNaN(v) ? null : v;
-      }).filter(v => v !== null);
-      if (values.length) {
-        const min = Math.min(...values);
-        const max = Math.max(...values);
-        const avg = values.reduce((a,b) => a+b, 0) / values.length;
-        stats.push({ label: k, value: formatCompact(max), sub: `min ${formatCompact(min)} · avg ${formatCompact(avg)}` });
+function renderMatrixInterface(rawMatrix, arrayContext) {
+  const normalizedDataset = arrayContext.length ? arrayContext : (Array.isArray(rawMatrix) ? rawMatrix : []);
+  
+  // Statistical Calculations Optimization Engine
+  let statisticsProfile = [];
+  if (normalizedDataset.length > 0) {
+    const objectArchetype = normalizedDataset[0] || {};
+    const quantifiableKeys = Object.keys(objectArchetype).filter(k => typeof objectArchetype[k] === 'number' || !isNaN(parseFloat(objectArchetype[k])));
+    
+    quantifiableKeys.slice(0, 4).forEach(field => {
+      const sampleArray = normalizedDataset.map(row => parseFloat(row[field])).filter(v => !isNaN(v));
+      if (sampleArray.length > 0) {
+        const peak = Math.max(...sampleArray);
+        const trough = Math.min(...sampleArray);
+        const mean = sampleArray.reduce((acc, curr) => acc + curr, 0) / sampleArray.length;
+        statisticsProfile.push({
+          keyName: field,
+          peakValue: formatMetricDecimal(peak),
+          metadataStr: `MIN: ${formatMetricDecimal(trough)} | AVG: ${formatMetricDecimal(mean)}`
+        });
       }
     });
   }
-  if (!stats.length) {
-    stats = [{ label: 'Rows', value: list.length, sub: '' }];
+  
+  if (!statisticsProfile.length) {
+    statisticsProfile = [{ keyName: 'Data Arrays Evaluated', peakValue: normalizedDataset.length, metadataStr: 'Matrix Dimension Array Bounds' }];
   }
 
-  let html = `<div class="stats-grid">`;
-  stats.forEach(s => {
-    html += `<div class="stat-box">
-      <div class="label">${s.label}</div>
-      <div class="value">${s.value}</div>
-      <div class="sub">${s.sub}</div>
-    </div>`;
+  // Construct High Fidelity Blueprint
+  let structuralDomString = `<div class="ticker-grid">`;
+  statisticsProfile.forEach(stat => {
+    structuralDomString += `
+      <div class="ticker-card">
+        <div class="label">${stat.keyName}</div>
+        <div class="value">${stat.peakValue}</div>
+        <div class="subtext">${stat.metadataStr}</div>
+      </div>
+    `;
   });
-  html += `</div>`;
+  structuralDomString += `</div>`;
 
-  // Chart container
-  const chartContainerId = 'chart-' + Date.now();
-  html += `<div class="card" style="margin-bottom:16px">
-    <div class="card-title">Interactive Chart</div>
-    <div class="chart-container" id="${chartContainerId}"></div>
-  </div>`;
-
-  // Table
-  if (list.length) {
-    const cols = Object.keys(list[0]).slice(0, 8);
-    html += `<div class="table-wrap">
-      <div class="table-head">
-        <span class="title">Data Table</span>
-        <span class="meta">${list.length} rows</span>
+  // Main Dashboard Grid
+  structuralDomString += `
+    <div class="pane-layout">
+      <div class="panel-node">
+        <div class="panel-header">
+          <h3>TradingView Realtime Structural Vector</h3>
+        </div>
+        <div class="chart-viewport" id="tvChartMountNode">
+          <div class="chart-overlay-legend" id="chartOverlayLegendFloor">
+            <div class="legend-row-main" id="legendMainTitle">Tracking Stream Array Vector</div>
+            <div class="legend-ohlc" id="legendOhlcDataMetrics"></div>
+          </div>
+        </div>
       </div>
-      <div class="table-scroll">
-        <table id="dataTable">
-          <thead><tr>${cols.map(c => `<th data-col="${c}">${c}</th>`).join('')}</tr></thead>
-          <tbody>
-            ${list.slice(0, 200).map(row => `
-              <tr>${cols.map(c => {
-                let val = row[c];
-                if (val === undefined || val === null) val = '—';
-                if (typeof val === 'number') {
-                  if (Math.abs(val) > 1000) val = formatCompact(val);
-                  else if (Math.abs(val) < 0.01 && val !== 0) val = val.toFixed(6);
-                  else val = val.toFixed(2);
-                } else if (typeof val === 'object') {
-                  val = JSON.stringify(val).slice(0, 40);
-                }
-                return `<td>${String(val)}</td>`;
-              }).join('')}</tr>
-            `).join('')}
-          </tbody>
-        </table>
+      
+      <div class="panel-node">
+        <div class="panel-header">
+          <h3>High Fidelity Linear Matrix Datagrid</h3>
+        </div>
+        <div class="table-container">
+          <div class="table-scroll" id="tableScrollContainerFloor">
+            ${generateDataGridMarkup(normalizedDataset)}
+          </div>
+        </div>
       </div>
-    </div>`;
-  } else {
-    html += `<div class="empty-state"><div class="icon">📭</div><div>No data extracted</div></div>`;
-  }
+    </div>
+  `;
 
-  // Raw toggle
-  html += `<div class="raw-toggle" onclick="toggleRaw()">▶ Raw JSON</div>
-    <div class="raw-box" id="rawBox">${JSON.stringify(data, null, 2)}</div>`;
+  // Raw JSON Diagnostic Section
+  structuralDomString += `
+    <div class="inspector-toggle" onclick="toggleMatrixInspector()">▼ Toggle Engine Matrix Context (JSON Payload Inspect)</div>
+    <pre class="inspector-pre" id="rawPayloadInspectorFloor">${escapeHtmlMarkup(JSON.stringify(rawMatrix, null, 2))}</pre>
+  `;
 
-  document.getElementById('content').innerHTML = html;
+  parseDom('viewportMainFloor').innerHTML = structuralDomString;
 
-  // Draw chart
-  if (list.length > 1) {
-    const container = document.getElementById(chartContainerId);
-    if (container) {
-      renderChart(container, list);
-    }
-  }
-
-  // Sortable table
-  const table = document.getElementById('dataTable');
-  if (table) {
-    table.querySelectorAll('thead th').forEach(th => {
-      th.addEventListener('click', () => {
-        const col = th.dataset.col;
-        const tbody = table.querySelector('tbody');
-        const rows = Array.from(tbody.querySelectorAll('tr'));
-        const dir = th.classList.contains('sorted-asc') ? -1 : 1;
-        rows.sort((a, b) => {
-          const idx = Array.from(th.parentElement.children).indexOf(th);
-          const va = a.cells[idx]?.textContent || '';
-          const vb = b.cells[idx]?.textContent || '';
-          const na = parseFloat(va), nb = parseFloat(vb);
-          return (!isNaN(na) && !isNaN(nb)) ? (na - nb) * dir : va.localeCompare(vb) * dir;
-        });
-        rows.forEach(r => tbody.appendChild(r));
-        table.querySelectorAll('thead th').forEach(h => h.classList.remove('sorted-asc', 'sorted-desc'));
-        th.classList.add(dir === 1 ? 'sorted-asc' : 'sorted-desc');
-      });
-    });
+  // Mount TradingView Candlestick Engine
+  if (normalizedDataset.length > 0) {
+    mountTradingViewChartEngine(parseDom('tvChartMountNode'), normalizedDataset);
   }
 }
 
-// ── Chart rendering with lightweight-charts ───────────────────
-function renderChart(container, data) {
-  // Detect OHLC columns
-  const keys = Object.keys(data[0]);
-  const hasOHLC = ['open','high','low','close'].every(k => keys.some(kk => kk.toLowerCase() === k));
-  const timeKey = keys.find(k => /time|date|timestamp/i.test(k)) || '';
-  const timeData = timeKey ? data.map(d => d[timeKey]) : data.map((_, i) => i);
-
-  // Destroy previous chart
-  if (chartInstance) {
-    chartInstance.remove();
-    chartInstance = null;
-    chartSeries = null;
+function generateDataGridMarkup(records) {
+  if (!records.length) {
+    return `<div class="state-empty">Execution matrix returned null set schema array dimensions.</div>`;
   }
+  
+  const headers = Object.keys(records[0]).slice(0, 10);
+  let markup = `
+    <table class="crypto-grid" id="executableDataGridFloor">
+      <thead>
+        <tr>
+          ${headers.map(head => `<th data-matrix-column="${head}" onclick="sortGridColumn('${head}')">${head}</th>`).join('')}
+        </tr>
+      </thead>
+      <tbody>
+  `;
+  
+  records.slice(0, 250).forEach(row => {
+    markup += `<tr>`;
+    headers.forEach(head => {
+      let variant = row[head];
+      if (variant === undefined || variant === null) {
+        variant = '—';
+      }
+      
+      let applicationClass = '';
+      if (typeof variant === 'number') {
+        if (variant > 0 && head.toLowerCase().includes('change')) applicationClass = 'trend-up';
+        if (variant < 0 && head.toLowerCase().includes('change')) applicationClass = 'trend-down';
+        
+        if (Math.abs(variant) >= 1000) variant = formatMetricDecimal(variant);
+        else if (Math.abs(variant) < 0.01 && variant !== 0) variant = variant.toFixed(6);
+        else variant = variant.toFixed(2);
+      } else if (typeof variant === 'object') {
+        variant = JSON.stringify(variant).slice(0, 30) + '...';
+      }
+      
+      markup += `<td class="${applicationClass}">${escapeHtmlMarkup(String(variant))}</td>`;
+    });
+    markup += `</tr>`;
+  });
+  
+  markup += `</tbody></table>`;
+  return markup;
+}
 
-  chartInstance = LightweightCharts.createChart(container, {
+function sortGridColumn(column) {
+  const table = parseDom('executableDataGridFloor');
+  if (!table) return;
+  
+  const tbody = table.querySelector('tbody');
+  const rowElements = Array.from(tbody.querySelectorAll('tr'));
+  const headerElements = Array.from(table.querySelectorAll('thead th'));
+  const targetHeader = headerElements.find(th => th.dataset.matrixColumn === column);
+  
+  if (sortingConfig.column === column) {
+    sortingConfig.direction *= -1;
+  } else {
+    sortingConfig.column = column;
+    sortingConfig.direction = 1;
+  }
+  
+  const targetIndex = headerElements.indexOf(targetHeader);
+  
+  rowElements.sort((x, y) => {
+    const rawX = x.cells[targetIndex]?.textContent || '';
+    const rawY = y.cells[targetIndex]?.textContent || '';
+    
+    const parsedX = parseFloat(rawX.replace(/,/g, ''));
+    const parsedY = parseFloat(rawY.replace(/,/g, ''));
+    
+    if (!isNaN(parsedX) && !isNaN(parsedY)) {
+      return (parsedX - parsedY) * sortingConfig.direction;
+    }
+    return rawX.localeCompare(rawY) * sortingConfig.direction;
+  });
+  
+  rowElements.forEach(r => tbody.appendChild(r));
+  
+  headerElements.forEach(h => h.classList.remove('sort-asc', 'sort-desc'));
+  targetHeader.classList.add(sortingConfig.direction === 1 ? 'sort-asc' : 'sort-desc');
+}
+
+function mountTradingViewChartEngine(container, sourceData) {
+  const elementWidth = container.clientWidth;
+  
+  // Instantiating High Performance Chart Construct Object Configuration Archetype
+  tvChartInstance = LightweightCharts.createChart(container, {
     layout: {
-      background: { type: 'solid', color: 'rgba(14,20,40,0.85)' },
-      textColor: '#b4c2e0',
+      background: { type: 'solid', color: '#0b1120' },
+      textColor: '#94a3b8',
+      fontFamily: varStyle('--font-mono'),
     },
     grid: {
-      vertLines: { color: 'rgba(255,255,255,0.04)' },
-      horzLines: { color: 'rgba(255,255,255,0.04)' },
+      vertLines: { color: 'rgba(255, 255, 255, 0.02)' },
+      horzLines: { color: 'rgba(255, 255, 255, 0.02)' },
     },
     crosshair: {
       mode: LightweightCharts.CrosshairMode.Normal,
-      vertLine: { color: '#f0b429', labelBackgroundColor: '#f0b429' },
-      horzLine: { color: '#f0b429', labelBackgroundColor: '#f0b429' },
+      vertLine: { color: 'rgba(240, 180, 41, 0.4)', style: 3, labelBackgroundColor: '#131b2e' },
+      horzLine: { color: 'rgba(240, 180, 41, 0.4)', style: 3, labelBackgroundColor: '#131b2e' },
     },
-    rightPriceScale: { borderColor: 'rgba(255,255,255,0.1)' },
-    timeScale: { borderColor: 'rgba(255,255,255,0.1)', timeVisible: true },
-    width: container.clientWidth,
-    height: 280,
+    rightPriceScale: { borderColor: 'rgba(255, 255, 255, 0.05)' },
+    timeScale: { borderColor: 'rgba(255, 255, 255, 0.05)', timeVisible: true, secondsVisible: false },
+    width: elementWidth,
+    height: 380,
   });
 
-  if (hasOHLC) {
-    const ohlcData = data.map((d, i) => ({
-      time: convertTime(timeData[i]),
-      open: parseFloat(d.open ?? d.Open ?? 0),
-      high: parseFloat(d.high ?? d.High ?? 0),
-      low: parseFloat(d.low ?? d.Low ?? 0),
-      close: parseFloat(d.close ?? d.Close ?? 0),
-    })).filter(d => d.time);
-    chartSeries = chartInstance.addCandlestickSeries({
-      upColor: '#3ddc84',
-      downColor: '#ff4d6d',
+  const rowKeys = Object.keys(sourceData[0] || {});
+  
+  // Mapping Structural Identification Rules for Core Datatypes (OHLC Vector Rules)
+  const matchingOhlcKeys = ['open', 'high', 'low', 'close'].every(key => rowKeys.some(rk => rk.toLowerCase() === key));
+  const detectedTimeToken = rowKeys.find(k => /time|date|timestamp|^t$/i.test(k)) || '';
+
+  // Parse, standardise and isolate timestamps to secure ascending linearity order requirement
+  let timelineSequence = [];
+  
+  if (matchingOhlcKeys) {
+    const ohlcFieldsMap = {
+      open: rowKeys.find(k => k.toLowerCase() === 'open'),
+      high: rowKeys.find(k => k.toLowerCase() === 'high'),
+      low: rowKeys.find(k => k.toLowerCase() === 'low'),
+      close: rowKeys.find(k => k.toLowerCase() === 'close'),
+    };
+    
+    timelineSequence = sourceData.map((record, index) => ({
+      time: extractTimelineInteger(record[detectedTimeToken], index, sourceData.length),
+      open: parseFloat(record[ohlcFieldsMap.open] ?? 0),
+      high: parseFloat(record[ohlcFieldsMap.high] ?? 0),
+      low: parseFloat(record[ohlcFieldsMap.low] ?? 0),
+      close: parseFloat(record[ohlcFieldsMap.close] ?? 0),
+    })).filter(item => item.time !== null);
+    
+    // Enforce Ascending Time Matrix Ordering to prevent core engine render asset panic bounds failure
+    timelineSequence.sort((a, b) => a.time - b.time);
+    
+    tvCandleSeries = tvChartInstance.addCandlestickSeries({
+      upColor: '#22c55e',
+      downColor: '#ef4444',
       borderVisible: false,
-      wickUpColor: '#3ddc84',
-      wickDownColor: '#ff4d6d',
+      wickUpColor: '#22c55e',
+      wickDownColor: '#ef4444',
     });
-    chartSeries.setData(ohlcData);
+    tvCandleSeries.setData(timelineSequence);
+    updateLegendOverlayDisplay(timelineSequence[timelineSequence.length - 1], true);
+    
+    // Establish Crosshair Interaction Event Registry Pipeline Loop
+    tvChartInstance.subscribeCrosshairMove(param => {
+      if (param.time) {
+        const structuralRow = param.seriesData.get(tvCandleSeries);
+        if (structuralRow) updateLegendOverlayDisplay(structuralRow, true);
+      } else {
+        updateLegendOverlayDisplay(timelineSequence[timelineSequence.length - 1], true);
+      }
+    });
+    
   } else {
-    // Fallback: line chart on first numeric column
-    const numericKey = keys.find(k => typeof data[0][k] === 'number' || !isNaN(parseFloat(data[0][k])));
-    if (numericKey) {
-      const lineData = data.map((d, i) => ({
-        time: convertTime(timeData[i]),
-        value: parseFloat(d[numericKey]) || 0,
-      })).filter(d => d.time);
-      chartSeries = chartInstance.addLineSeries({
-        color: '#f0b429',
+    // Dynamic Linear Vector Fallback Mode Configuration Array Pipeline Target
+    const numericTargetKey = rowKeys.find(k => typeof sourceData[0][k] === 'number' || !isNaN(parseFloat(sourceData[0][k])));
+    if (numericTargetKey) {
+      timelineSequence = sourceData.map((record, index) => ({
+        time: extractTimelineInteger(record[detectedTimeToken], index, sourceData.length),
+        value: parseFloat(record[numericTargetKey] ?? 0),
+      })).filter(item => item.time !== null);
+      
+      timelineSequence.sort((a, b) => a.time - b.time);
+      
+      tvLineSeries = tvChartInstance.addAreaSeries({
+        topColor: 'rgba(240, 180, 41, 0.2)',
+        bottomColor: 'rgba(240, 180, 41, 0.0)',
+        lineColor: '#f0b429',
         lineWidth: 2,
       });
-      chartSeries.setData(lineData);
+      tvLineSeries.setData(timelineSequence);
+      updateLegendOverlayDisplay({ label: numericTargetKey, value: timelineSequence[timelineSequence.length - 1]?.value }, false);
+      
+      tvChartInstance.subscribeCrosshairMove(param => {
+        if (param.time) {
+          const structuralRow = param.seriesData.get(tvLineSeries);
+          if (structuralRow) updateLegendOverlayDisplay({ label: numericTargetKey, value: structuralRow.value }, false);
+        } else {
+          updateLegendOverlayDisplay({ label: numericTargetKey, value: timelineSequence[timelineSequence.length - 1]?.value }, false);
+        }
+      });
     }
   }
-  chartInstance.timeScale().fitContent();
+
+  tvChartInstance.timeScale().fitContent();
 }
 
-function convertTime(value) {
-  // Accept Unix timestamps (seconds or ms), ISO strings, or index
-  if (typeof value === 'number') {
-    // If it's in seconds (10 digits) convert to ms
-    if (value < 1e12) value *= 1000;
-    return value;
+function updateLegendOverlayDisplay(datasetObject, isOhlcFormat) {
+  const frameMount = parseDom('legendOhlcDataMetrics');
+  if (!datasetObject) return;
+  
+  if (isOhlcFormat) {
+    const priceDelta = datasetObject.close - datasetObject.open;
+    const performanceIndicatorClass = priceDelta >= 0 ? 'trend-up' : 'trend-down';
+    frameMount.innerHTML = `
+      O <span class="legend-val">${formatMetricDecimal(datasetObject.open)}</span>
+      H <span class="legend-val">${formatMetricDecimal(datasetObject.high)}</span>
+      L <span class="legend-val">${formatMetricDecimal(datasetObject.low)}</span>
+      C <span class="legend-val ${performanceIndicatorClass}">${formatMetricDecimal(datasetObject.close)}</span>
+      Δ <span class="legend-val ${performanceIndicatorClass}">${priceDelta >= 0 ? '+' : ''}${formatMetricDecimal(priceDelta)}</span>
+    `;
+  } else {
+    frameMount.innerHTML = `
+      ${escapeHtmlMarkup(datasetObject.label)}: <span class="legend-val" style="color:var(--brand-accent)">${formatMetricDecimal(datasetObject.value)}</span>
+    `;
   }
-  if (typeof value === 'string') {
-    const d = new Date(value);
-    if (!isNaN(d.getTime())) return d.getTime();
+}
+
+function extractTimelineInteger(rawToken, elementIndex, structuralLength) {
+  if (!rawToken) {
+    // Generate linear epoch tracking matrices if time array context bounds return undefined
+    return Math.floor(Date.now() / 1000) - (structuralLength - elementIndex) * 60;
   }
-  // fallback: use index as Unix ms
-  return (Date.now() - 86400000) + (typeof value === 'number' ? value * 60000 : 0);
+  if (typeof rawToken === 'number') {
+    // Structural conversion rule standardizing millisecond timestamps to absolute Unix seconds boundaries
+    if (rawToken > 5e11) return Math.floor(rawToken / 1000);
+    return rawToken;
+  }
+  if (typeof rawToken === 'string') {
+    const convertedDateObject = new Date(rawToken);
+    if (!isNaN(convertedDateObject.getTime())) return Math.floor(convertedDateObject.getTime() / 1000);
+  }
+  return Math.floor(Date.now() / 1000) - (structuralLength - elementIndex) * 60;
 }
 
-function formatCompact(n) {
-  if (n >= 1e9) return (n/1e9).toFixed(2) + 'B';
-  if (n >= 1e6) return (n/1e6).toFixed(2) + 'M';
-  if (n >= 1e3) return (n/1e3).toFixed(1) + 'K';
-  return n.toFixed(2);
+function formatMetricDecimal(numValue) {
+  if (numValue === undefined || numValue === null || isNaN(numValue)) return '0.00';
+  const numericAbsolute = Math.abs(numValue);
+  if (numericAbsolute >= 1e9) return (numValue / 1e9).toFixed(2) + 'B';
+  if (numericAbsolute >= 1e6) return (numValue / 1e6).toFixed(2) + 'M';
+  if (numericAbsolute >= 1e3) return (numValue / 1e3).toFixed(1) + 'K';
+  return numValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
 }
 
-function toggleRaw() {
-  const box = document.getElementById('rawBox');
-  box.style.display = box.style.display === 'none' ? 'block' : 'none';
+function varStyle(propertyString) {
+  return getComputedStyle(document.documentElement).getPropertyValue(propertyString).trim();
 }
 
-// ── Sidebar collapse ──────────────────────────────────────────
-function toggleSidebar() {
-  document.getElementById('sidebar').classList.toggle('collapsed');
+function toggleMatrixInspector() {
+  const panel = parseDom('rawPayloadInspectorFloor');
+  panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
 }
 
-// ── Explorer ──────────────────────────────────────────────────
-function showExplorer() {
-  setActive('explorer');
-  document.getElementById('tbPanel').textContent = 'API Explorer';
-  const content = document.getElementById('content');
-  content.innerHTML = `
-    <div class="explorer-card">
-      <label>Endpoint Path</label>
-      <input id="exPath" placeholder="/api/coin/liq/heatmap" value="/api/coin/liq/heatmap">
-      <label>Params (JSON)</label>
-      <textarea id="exParams">{"time":"h1","type":"coin"}</textarea>
-      <button class="explorer-btn" onclick="runExplorer()">Fetch & Decrypt</button>
-      <div class="chip-list">
-        ${registry.slice(0, 12).map(e => `<span class="chip" onclick="setExplorer('${e.path}', '${JSON.stringify(e.params)}')">${e.path}</span>`).join('')}
+function escapeHtmlMarkup(unsafeTextStr) {
+  return unsafeTextStr
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+// Custom Endpoint Explorer Pipeline Block Layer
+function renderDynamicExplorer() {
+  activeId = 'api_explorer';
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+  parseDom('currentPanelLabel').textContent = 'API Engine Matrix Explorer';
+  
+  parseDom('viewportMainFloor').innerHTML = `
+    <div class="explorer-panel">
+      <div class="form-row">
+        <div class="field-group">
+          <label>Target Entry Path Router</label>
+          <input id="expRouterPath" placeholder="/api/coin/liq/heatmap" value="/api/coin/liq/heatmap">
+        </div>
+        <div class="field-group">
+          <label>Payload Parameter Construct (Strict JSON Map Structural Layout)</label>
+          <textarea id="expRouterParams">{"time":"h1","type":"coin"}</textarea>
+        </div>
       </div>
+      <button class="btn-submit" onclick="executeCustomPipelineDiscovery()">Query Decentralized Matrix Vector</button>
     </div>
-    <div id="exResult"></div>
+    <div id="explorerEngineResponseFloor"></div>
   `;
 }
 
-function setExplorer(path, params) {
-  document.getElementById('exPath').value = path;
-  document.getElementById('exParams').value = params;
-}
-
-async function runExplorer() {
-  const path = document.getElementById('exPath').value.trim();
-  let params = {};
-  try { params = JSON.parse(document.getElementById('exParams').value || '{}'); } catch(e) { alert('Invalid JSON params'); return; }
-  const result = document.getElementById('exResult');
-  result.innerHTML = '<div class="skeleton" style="height:200px;border-radius:12px"></div>';
+async function executeCustomPipelineDiscovery() {
+  const path = parseDom('expRouterPath').value.trim();
+  let argumentsPayload = {};
+  
   try {
-    const r = await fetch('/api/explore', {
+    argumentsPayload = JSON.parse(parseDom('expRouterParams').value || '{}');
+  } catch (ex) {
+    alert('Strict Parser Exception Validation Error: Invalid Structural Parameter JSON Mapping Format Passed.');
+    return;
+  }
+  
+  const responseFrame = parseDom('explorerEngineResponseFloor');
+  responseFrame.innerHTML = '<div class="panel-node shimmer-state" style="height:220px"></div>';
+  
+  try {
+    const rawResStream = await fetch('/api/explore', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path, params })
+      body: JSON.stringify({ path, params: argumentsPayload })
     });
-    const j = await r.json();
-    if (!j.success) throw new Error(j.error);
-    result.innerHTML = `
-      <div class="table-wrap">
-        <div class="table-head"><span class="title">${j.url}</span><span class="badge bg-green">✅ Decrypted</span></div>
-        <div class="table-scroll"><pre style="padding:12px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted);max-height:300px;overflow:auto">${JSON.stringify(j.data, null, 2)}</pre></div>
+    const networkResponseData = await rawResStream.json();
+    if (!networkResponseData.success) throw new Error(networkResponseData.error);
+    
+    responseFrame.innerHTML = `
+      <div class="panel-node" style="margin-top:16px;">
+        <div class="panel-header">
+          <h3>Decrypted Memory Context Engine Vector Stream Output: ${escapeHtmlMarkup(networkResponseData.url)}</h3>
+        </div>
+        <pre style="padding:16px; background:#04060b; color:#22c55e; font-family:var(--font-mono); font-size:11px; max-height:400px; overflow:auto;">${escapeHtmlMarkup(JSON.stringify(networkResponseData.data, null, 2))}</pre>
       </div>
     `;
-  } catch(e) {
-    result.innerHTML = `<div class="error-box"><strong>Error</strong>${e.message}</div>`;
+  } catch (err) {
+    responseFrame.innerHTML = `<div class="error-fallback" style="margin-top:16px;"><strong>Discovery Exception Pipeline Halt</strong>${err.message}</div>`;
   }
 }
 
-// ── Clock ──────────────────────────────────────────────────────
+// Clock Loop Synchronization
 setInterval(() => {
-  const el = document.getElementById('tbTime');
-  if (el && el.textContent !== '--:--:--') el.textContent = new Date().toLocaleTimeString();
+  parseDom('clockFloor').textContent = new Date().toLocaleTimeString();
 }, 1000);
 
-// ── Init ───────────────────────────────────────────────────────
-loadRegistry().then(() => {
-  const first = registry[0];
-  if (first) loadEndpoint(first.id);
-});
+// Global Boot Event Binding Hook
+window.addEventListener('DOMContentLoaded', instantiateTerminalInfrastructure);
 </script>
 </body>
 </html>
