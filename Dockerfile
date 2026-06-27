@@ -199,7 +199,7 @@ RUN cat <<'HTMLEOF' > /app/templates/dashboard.html
 <title>CoinGlass Terminal PRO</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <style>
 :root {
   --bg-main: #060913;
@@ -806,7 +806,7 @@ function mountTradingViewChartEngine(container, sourceData) {
     // Enforce Ascending Time Matrix Ordering to prevent core engine render asset panic bounds failure
     timelineSequence.sort((a, b) => a.time - b.time);
     
-    tvCandleSeries = tvChartInstance.addCandlestickSeries({
+    tvCandleSeries = tvChartInstance.addSeries(LightweightCharts.CandlestickSeries, {
       upColor: '#22c55e',
       downColor: '#ef4444',
       borderVisible: false,
@@ -837,7 +837,7 @@ function mountTradingViewChartEngine(container, sourceData) {
       
       timelineSequence.sort((a, b) => a.time - b.time);
       
-      tvLineSeries = tvChartInstance.addAreaSeries({
+      tvLineSeries = tvChartInstance.addSeries(LightweightCharts.AreaSeries, {
         topColor: 'rgba(240, 180, 41, 0.2)',
         bottomColor: 'rgba(240, 180, 41, 0.0)',
         lineColor: '#f0b429',
