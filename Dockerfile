@@ -1,13 +1,12 @@
 FROM python:3.11-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc libffi-dev curl && rm -rf /var/lib/apt/lists/*
+    gcc libffi-dev && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 RUN pip install --no-cache-dir fastapi uvicorn[standard] httpx pycryptodome jinja2 aiofiles
 RUN mkdir -p /app/templates /app/static
-RUN curl -fsSL -o /app/static/lwc.js \
-    "https://unpkg.com/lightweight-charts@4.1.7/dist/lightweight-charts.standalone.production.js"
+RUN python -c "import urllib.request; urllib.request.urlretrieve('https://unpkg.com/lightweight-charts@4.1.7/dist/lightweight-charts.standalone.production.js', '/app/static/lwc.js')"
 
 # ============================================================
 # decrypt.py
@@ -660,7 +659,9 @@ function mountChart(rows, numKeys) {
     /* Use the endpoint's sort param as preferred value column (e.g. rsi4h, h4PriceChangePercent) */
     const ep = S.reg.find(e => e.id === S.id);
     const sortCol = ep?.params?.sort;
-    const valCol = (sortCol && numKeys.includes(sortCol)) ? sortCol : numKeys[0];
+    const getSpread = k => Math.max(...rows.slice(0,30).map(r => Math.abs(parseFloat(r[k])||0)));
+    const valCol = (sortCol && numKeys.includes(sortCol)) ? sortCol
+                 : numKeys.slice(0,10).reduce((best,k) => getSpread(k) > getSpread(best) ? k : best, numKeys[0]);
     /* Prefer canonical symbol/coin columns for labels */
     const lblKey = keys.find(k => /^(symbol|coin|basecoin|basesymbol|name|ticker)$/i.test(k))
                 || keys.find(k => typeof rows[0][k]==='string' && rows[0][k].length<30)
