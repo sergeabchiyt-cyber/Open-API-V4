@@ -4,8 +4,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc libffi-dev && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-RUN pip install --no-cache-dir fastapi uvicorn[standard] httpx pycryptodome jinja2
-RUN mkdir -p /app/templates
+RUN pip install --no-cache-dir fastapi uvicorn[standard] httpx pycryptodome jinja2 aiofiles
+RUN mkdir -p /app/templates /app/static
+RUN wget -q -O /app/static/lwc.js \
+    "https://unpkg.com/lightweight-charts@4.1.7/dist/lightweight-charts.standalone.production.js"
 
 # ============================================================
 # decrypt.py
@@ -82,89 +84,20 @@ async def fetch_and_decrypt(url, params=None, timeout=15):
 PYEOF
 
 # ============================================================
-# main.py — updated extract() with parallel-array handling
-# ============================================================
-RUN cat <<'PYEOF' > /app/main.py
-import os, json, gzip, base64, time, logging
-from urllib.parse import urlparse
-from Crypto.Cipher import AES
-from Crypto.Util.Padding import unpad
-import httpx
-
-logger = logging.getLogger(__name__)
-
-_KEY_TABLE = {
-    "55": "170b070da9654622",
-    "66": "d6537d845a964081",
-    "77": "863f08689c97435b",
-}
-
-for _pair in os.environ.get("CAPI_EXTRA_KEYS", "").split(","):
-    if "=" in _pair:
-        _k, _v = _pair.strip().split("=", 1)
-        _KEY_TABLE[_k.strip()] = _v.strip()
-
-def _derive_key0(v, url="", outer=None):
-    if v == "0":
-        constant = url
-    elif v == "1":
-        constant = urlparse(url).path or url
-    elif v == "2":
-        constant = str((outer or {}).get("time", ""))
-    else:
-        constant = _KEY_TABLE.get(v)
-        if constant is None:
-            raise ValueError(
-                f"Unknown encryption v={v}. "
-                f"Inject new key via CAPI_EXTRA_KEYS env var: '{v}=<16-char-hex>'"
-            )
-    return base64.b64encode(constant.encode()).decode()[:16]
-
-def decrypt(body, user_b64, v, url=""):
-    outer = json.loads(body)
-    if "data" not in outer:
-        return outer
-    payload = base64.b64decode(outer["data"])
-    token   = base64.b64decode(user_b64)
-    key0    = _derive_key0(v, url, outer)
-    step1   = unpad(AES.new(key0.encode(), AES.MODE_ECB).decrypt(token), 16)
-    akey    = gzip.decompress(step1).decode()
-    step2   = unpad(AES.new(akey.encode(), AES.MODE_ECB).decrypt(payload), 16)
-    return json.loads(gzip.decompress(step2).decode())
-
-async def fetch_and_decrypt(url, params=None, timeout=15):
-    headers = {
-        "Accept": "application/json, text/plain, */*",
-        "cache-ts-v2": str(int(time.time() * 1000)),
-        "encryption": "true",
-        "language": "en",
-        "Origin": "https://www.coinglass.com",
-        "Referer": "https://www.coinglass.com",
-        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Chrome/125.0.0.0 Safari/537.36",
-    }
-    async with httpx.AsyncClient(timeout=timeout) as c:
-        r = await c.get(url, params=params or {}, headers=headers)
-        r.raise_for_status()
-        user = r.headers.get("user")
-        v    = r.headers.get("v")
-        if not user or not v:
-            try:
-                return r.json()
-            except Exception:
-                return {"raw": r.text}
-        return decrypt(r.text, user, v, url)
-
-# ============================================================
 # main.py — 200 status on API errors so client can read JSON
 # ============================================================
+RUN cat <<'PYEOF' > /app/main.py
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-import traceback
+from decrypt import fetch_and_decrypt
+import json, logging, traceback
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 app  = FastAPI(title="CoinGlass Terminal")
+app.mount("/static", StaticFiles(directory="/app/static"), name="static")
 T    = Jinja2Templates(directory="/app/templates")
 BASE = "https://capi.coinglass.com"
 
@@ -209,71 +142,23 @@ REGISTRY = [
 ]
 
 def extract(d):
-    """Extract tabular rows from CoinGlass API responses.
-
-    Handles:
-    - Standard nested lists (list, topInflowList, rankList, etc.)
-    - Parallel-array time-series (dateList + dataMap/frDataMap + priceList)
-    - Simple parallel arrays (dates + prices)
-    - Flat list of objects (ETF flow, liquidation orders)
-    - Nested exchange breakdowns (fut_liq_chart with createTime + list)
-    """
-    if isinstance(d, list):
-        if len(d) > 0 and isinstance(d[0], dict):
-            # ETF-like: {date, change, changeUsd, list: [...]} — already good
-            if 'date' in d[0] and 'list' in d[0]:
-                return d
-            # Liquidation-like: {createTime, list: [{exchangeName, ...}, ...]}
-            if 'createTime' in d[0] and 'list' in d[0]:
-                result = []
-                for item in d:
-                    row = {k: v for k, v in item.items() if k != 'list'}
-                    for ex in item.get('list', []):
-                        ex_name = ex.get('exchangeName', 'Unknown')
-                        for k, v in ex.items():
-                            if k not in ('exchangeName', 'exchangeLogo'):
-                                row[f"{ex_name}_{k}"] = v
-                    result.append(row)
-                return result
-        return d
-
+    if isinstance(d, list): return d
     if isinstance(d, dict):
-        # CoinGlass parallel-array time-series: dateList + dataMap/frDataMap + priceList
-        if 'dateList' in d and isinstance(d.get('dateList'), list):
-            date_list = d['dateList']
-            result = []
-            for i, ts in enumerate(date_list):
-                row = {'time': ts}
-                # Price series (BTC/ETH price alongside funding/OI)
-                if 'priceList' in d and i < len(d['priceList']):
-                    row['price'] = d['priceList'][i]
-                # Prefer frDataMap (funding rates) over dataMap to avoid duplicates
-                if 'frDataMap' in d:
-                    for key, values in d['frDataMap'].items():
-                        if i < len(values):
-                            row[key] = values[i]
-                elif 'dataMap' in d:
-                    for key, values in d['dataMap'].items():
-                        if i < len(values):
-                            row[key] = values[i]
-                result.append(row)
-            return result
-
-        # Simple parallel arrays: dates + prices (CGDI index)
-        if 'dates' in d and 'prices' in d and isinstance(d.get('dates'), list) and isinstance(d.get('prices'), list):
-            return [{'time': t, 'value': v} for t, v in zip(d['dates'], d['prices'])]
-
-        # Standard nested list extraction
-        for k in ["list", "topInflowList", "inflowList", "rankList", "coins", "data", "rows"]:
-            if k not in d:
-                continue
+        # CoinGlass time-series pattern: {dateList:[ms,...], dataMap:{exchange:[val,...]}}
+        if "dateList" in d and "dataMap" in d:
+            dates   = d["dateList"]
+            datamap = d["dataMap"]
+            if isinstance(dates, list) and isinstance(datamap, dict):
+                for exch, vals in datamap.items():
+                    if isinstance(vals, list) and len(vals) == len(dates):
+                        return [{"time": dates[i], exch: vals[i]} for i in range(len(dates))]
+        for k in ["list","topInflowList","inflowList","rankList","coins","data","rows"]:
+            if k not in d: continue
             v = d[k]
-            if isinstance(v, list):
-                return v
+            if isinstance(v, list): return v
             if isinstance(v, dict):
-                for kk in ["list", "topInflowList", "rankList"]:
-                    if kk in v and isinstance(v[kk], list):
-                        return v[kk]
+                nested = extract(v)   # recurse handles dateList+dataMap inside data.{}
+                if nested: return nested
     return []
 
 @app.get("/", response_class=HTMLResponse)
@@ -313,11 +198,10 @@ async def explore(req: Request):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=10000)
-
 PYEOF
 
 # ============================================================
-# dashboard.html — updated smartExtract, chart rendering, multi-series
+# dashboard.html — full UI overhaul
 # ============================================================
 RUN cat <<'HTMLEOF' > /app/templates/dashboard.html
 <!DOCTYPE html>
@@ -328,7 +212,7 @@ RUN cat <<'HTMLEOF' > /app/templates/dashboard.html
 <title>CoinGlass Terminal</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://unpkg.com/lightweight-charts@4.1.7/dist/lightweight-charts.standalone.production.js"></script>
+<script src="/static/lwc.js"></script>
 <style>
 :root {
   --bg:       #04080E;
@@ -692,7 +576,7 @@ function showSkeleton() {
 function render(raw, rows) {
   destroyChart();
   if (!rows.length) rows = normalize(smartExtract(raw));
-  const IS_TIME = k => /^(time|t|date|timestamp|ts|createTime)$/i.test(k) || /time|date/i.test(k);
+  const IS_TIME = k => /^(time|t|date|timestamp|ts)$/i.test(k) || /time|date/i.test(k);
   const allKeys = rows.length ? Object.keys(rows[0]) : [];
   const numKeys = allKeys.filter(k => {
     const v = rows[0][k];
@@ -742,19 +626,19 @@ function render(raw, rows) {
       <div class="inspector-body" id="iBody">${esc(JSON.stringify(raw,null,2))}</div>
     </div>`;
 
-  mountChart(rows, numKeys, allKeys);
+  mountChart(rows, numKeys);
 }
 
 /* ── Chart ── */
-function mountChart(rows, numKeys, allKeys) {
+function mountChart(rows, numKeys) {
   const host = $('chartHost');
   if (!host || !rows.length || !numKeys.length) {
     if (host) host.innerHTML = '<div class="chart-empty"><div class="chart-empty-icon">∅</div>No chartable data</div>';
     return;
   }
 
-  const keys    = allKeys || Object.keys(rows[0]);
-  const timeKey = keys.find(k => /^(time|t|date|timestamp|ts|createTime)$/i.test(k) || /time|date/i.test(k)) || null;
+  const keys    = Object.keys(rows[0]);
+  const timeKey = keys.find(k => /^(time|t|date|timestamp|ts)$/i.test(k) || /time|date/i.test(k)) || null;
 
   /* OHLC detection */
   const ohlc = (() => {
@@ -770,21 +654,18 @@ function mountChart(rows, numKeys, allKeys) {
   })();
 
   if (timeKey || ohlc) {
-    // Prefer price/value/close as primary series, then first numeric non-time
-    const preferred = numKeys.find(k => (k==='price'||k==='value'||k==='close') && k!==timeKey);
-    const valCol = preferred || numKeys.find(k => k !== timeKey) || numKeys[0];
-    mountLWC(host, rows, timeKey, ohlc, valCol, numKeys);
+    const valCol = numKeys.find(k => k !== timeKey) || numKeys[0];
+    mountLWC(host, rows, timeKey, ohlc, valCol);
   } else {
-    // No time axis — render horizontal bar chart
-    const preferredLabels = ['symbol','name','exchangeName','ticker','coin'];
-    const lblKey = preferredLabels.find(k => keys.includes(k) && typeof rows[0][k]==='string')
-                || keys.find(k => typeof rows[0][k]==='string' && rows[0][k].length<30) || null;
-    // Prefer endpoint-relevant numeric columns for bar values
-    const preferredBarVals = ['rsi4h','rsi1h','rsi24h','rsi1w','h4PriceChangePercent','h1PriceChangePercent',
-                               'h4OiChangePercent','h1OiChangePercent','h1LiquidationUsd','h24LiquidationUsd',
-                               'change','changeUsd','avgFundingRateByOi','avgFundingRateBySymbol'];
-    const barVal = preferredBarVals.find(k => numKeys.includes(k)) || numKeys[0];
-    mountBarChart(host, rows, barVal, lblKey);
+    /* Use the endpoint's sort param as preferred value column (e.g. rsi4h, h4PriceChangePercent) */
+    const ep = S.reg.find(e => e.id === S.id);
+    const sortCol = ep?.params?.sort;
+    const valCol = (sortCol && numKeys.includes(sortCol)) ? sortCol : numKeys[0];
+    /* Prefer canonical symbol/coin columns for labels */
+    const lblKey = keys.find(k => /^(symbol|coin|basecoin|basesymbol|name|ticker)$/i.test(k))
+                || keys.find(k => typeof rows[0][k]==='string' && rows[0][k].length<30)
+                || null;
+    mountBarChart(host, rows, valCol, lblKey);
   }
 }
 
@@ -800,7 +681,7 @@ function dedup(data) {
   return data.filter(d=>{ if(seen.has(d.time)) return false; seen.add(d.time); return true; });
 }
 
-function mountLWC(host, rows, timeKey, ohlc, numCol, allNumKeys) {
+function mountLWC(host, rows, timeKey, ohlc, numCol) {
   host.innerHTML = `
     <div id="lwcMount"></div>
     <div class="chart-legend">
@@ -859,7 +740,6 @@ function mountLWC(host, rows, timeKey, ohlc, numCol, allNumKeys) {
     $('chartPill') && ($('chartPill').textContent = data.length+' bars');
 
   } else {
-    // Primary area series
     S.series = S.chart.addAreaSeries({
       topColor:'rgba(240,164,22,0.14)',
       bottomColor:'rgba(240,164,22,0)',
@@ -879,27 +759,6 @@ function mountLWC(host, rows, timeKey, ohlc, numCol, allNumKeys) {
       if (bar) $('lgOhlc').innerHTML = `<span class="v">${fmt(bar.value)}</span>`;
     });
     $('chartPill') && ($('chartPill').textContent = data.length+' pts');
-
-    // Add secondary line series for other numeric columns (up to 3 extras)
-    const extraCols = (allNumKeys || []).filter(k => k !== numCol && k !== timeKey && k !== 'time').slice(0, 3);
-    const colors = ['#0EBA88', '#F4455A', '#5E7285'];
-    extraCols.forEach((col, idx) => {
-      const s = S.chart.addLineSeries({
-        color: colors[idx % colors.length],
-        lineWidth: 1,
-        priceScaleId: 'left',
-      });
-      const d = dedup(
-        rows.map((r,i)=>({
-          time:  toUnix(timeKey ? r[timeKey] : null, i, rows.length),
-          value: parseFloat(r[col])||0,
-        })).sort((a,b)=>a.time-b.time)
-      );
-      s.setData(d);
-    });
-    if (extraCols.length) {
-      S.chart.priceScale('left').applyOptions({ visible: true, borderColor: 'rgba(255,255,255,0.06)' });
-    }
   }
 
   S.chart.timeScale().fitContent();
@@ -1062,57 +921,10 @@ function $(id) { return document.getElementById(id); }
 
 /* ── Smart extraction: handles nested CoinGlass data shapes ── */
 function smartExtract(raw) {
-  if (Array.isArray(raw)) {
-    if (raw.length > 0 && typeof raw[0] === 'object' && !Array.isArray(raw[0])) {
-      // ETF-like: {date, change, changeUsd, list: [...]} — already good
-      if ('date' in raw[0] && 'list' in raw[0]) return raw;
-      // Liquidation-like: {createTime, list: [{exchangeName, ...}, ...]}
-      if ('createTime' in raw[0] && 'list' in raw[0]) {
-        return raw.map(item => {
-          const row = {...item};
-          delete row.list;
-          (item.list || []).forEach(ex => {
-            const name = ex.exchangeName || 'Unknown';
-            Object.entries(ex).forEach(([k, v]) => {
-              if (k !== 'exchangeName' && k !== 'exchangeLogo') row[`${name}_${k}`] = v;
-            });
-          });
-          return row;
-        });
-      }
-    }
-    return raw;
-  }
+  if (Array.isArray(raw)) return raw;
   if (!raw || typeof raw !== 'object') return [];
-
-  // CoinGlass parallel-array time-series: dateList + dataMap/frDataMap + priceList
-  if (raw.dateList && Array.isArray(raw.dateList)) {
-    const result = [];
-    for (let i = 0; i < raw.dateList.length; i++) {
-      const row = {time: raw.dateList[i]};
-      if (raw.priceList && i < raw.priceList.length) row.price = raw.priceList[i];
-      // Prefer frDataMap over dataMap to avoid duplicate columns
-      if (raw.frDataMap) {
-        Object.entries(raw.frDataMap).forEach(([key, values]) => {
-          if (i < values.length) row[key] = values[i];
-        });
-      } else if (raw.dataMap) {
-        Object.entries(raw.dataMap).forEach(([key, values]) => {
-          if (i < values.length) row[key] = values[i];
-        });
-      }
-      result.push(row);
-    }
-    return result;
-  }
-
-  // Simple parallel arrays: dates + prices (CGDI index)
-  if (raw.dates && raw.prices && Array.isArray(raw.dates) && Array.isArray(raw.prices)) {
-    return raw.dates.map((t, i) => ({time: t, value: raw.prices[i]}));
-  }
-
+  // raw.data is a flat list
   if (Array.isArray(raw.data)) return raw.data;
-
   // dig up to depth 3 for the largest array of objects or 2-tuples
   const found = [];
   function dig(obj, d) {
@@ -1147,7 +959,6 @@ boot();
 </script>
 </body>
 </html>
-
 HTMLEOF
 
 EXPOSE 10000
