@@ -200,7 +200,7 @@ if __name__ == "__main__":
 PYEOF
 
 # ============================================================
-# dashboard.html — full UI overhaul
+# dashboard.html — chart sizing & rendering fixes
 # ============================================================
 RUN cat <<'HTMLEOF' > /app/templates/dashboard.html
 <!DOCTYPE html>
@@ -302,7 +302,7 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
 }
 
 /* ── Main ── */
-.main { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+.main { flex:1; display:flex; flex-direction:column; overflow:hidden; min-width:0; }
 .topbar {
   height:var(--topbar); flex-shrink:0;
   background:var(--surface);
@@ -326,7 +326,7 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
 .btn-accent:hover { opacity:0.88; }
 
 /* ── Content ── */
-.content { flex:1; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:12px; }
+.content { flex:1; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:12px; min-width:0; }
 
 /* ── KPI strip ── */
 .kpi-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:8px; }
@@ -343,11 +343,12 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
 .kpi-sub   { font-size:10px; color:var(--t2); margin-top:3px; }
 
 /* ── Split panel ── */
-.split { display:grid; grid-template-columns:3fr 2fr; gap:12px; }
+.split { display:grid; grid-template-columns:3fr 2fr; gap:12px; min-width:0; }
+.split > * { min-width:0; }
 @media(max-width:1080px) { .split { grid-template-columns:1fr; } }
 
 /* ── Panel ── */
-.panel { background:var(--surface); border:1px solid var(--border); display:flex; flex-direction:column; }
+.panel { background:var(--surface); border:1px solid var(--border); display:flex; flex-direction:column; min-width:0; }
 .panel-head {
   padding:7px 12px; border-bottom:1px solid var(--border);
   display:flex; align-items:center; gap:8px;
@@ -357,19 +358,8 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
 .panel-head .pill { font-size:9px; color:var(--t3); background:var(--elevated); padding:1px 5px; margin-left:auto; }
 
 /* ── Chart ── */
-.chart-host { position:relative; height:340px; overflow:hidden; }
-/* signature: subtle CRT scanline grid */
-.chart-host::after {
-  content:''; position:absolute; inset:0; pointer-events:none; z-index:5;
-  background:repeating-linear-gradient(
-    0deg,
-    transparent,
-    transparent 3px,
-    rgba(0,0,0,0.04) 3px,
-    rgba(0,0,0,0.04) 4px
-  );
-}
-#lwcMount { position:absolute; inset:0; }
+.chart-host { position:relative; height:340px; width:100%; min-width:0; overflow:hidden; }
+#lwcMount { position:absolute; top:0; left:0; width:100%; height:100%; }
 .chart-legend {
   position:absolute; top:10px; left:12px; z-index:10;
   pointer-events:none; font-size:11px; line-height:1.6;
@@ -387,10 +377,10 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
 .chart-empty-icon { font-size:28px; color:var(--t3); }
 
 /* ── Bar chart ── */
-.bar-chart { padding:10px 14px; display:flex; flex-direction:column; gap:5px; max-height:340px; overflow-y:auto; }
-.bar-row   { display:flex; align-items:center; gap:8px; }
+.bar-chart { padding:10px 14px; display:flex; flex-direction:column; gap:5px; height:100%; overflow-y:auto; }
+.bar-row   { display:flex; align-items:center; gap:8px; width:100%; }
 .bar-label { font-size:10px; color:var(--t2); width:72px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right; flex-shrink:0; }
-.bar-track { flex:1; height:16px; background:var(--elevated); position:relative; overflow:hidden; }
+.bar-track { flex:1; height:16px; background:var(--elevated); position:relative; overflow:hidden; min-width:0; }
 .bar-fill  { height:100%; background:var(--accent-bg); border-right:2px solid var(--accent); transition:width 0.35s cubic-bezier(0.4,0,0.2,1); }
 .bar-fill.pos { background:var(--green-bg); border-right-color:var(--green); }
 .bar-fill.neg { background:var(--red-bg);   border-right-color:var(--red); }
@@ -493,7 +483,7 @@ tr:hover td { background:rgba(255,255,255,0.015); }
 </div>
 <script>
 /* ── State ── */
-const S = { id:null, reg:[], chart:null, series:null, sort:{col:null,dir:1} };
+const S = { id:null, reg:[], chart:null, series:null, sort:{col:null,dir:1}, ro:null };
 
 /* ── Boot ── */
 async function boot() {
@@ -575,7 +565,6 @@ function showSkeleton() {
 function render(raw, rows) {
   destroyChart();
   if (!rows.length) rows = normalize(smartExtract(raw));
-  const IS_TIME = k => /^(time|t|date|timestamp|ts)$/i.test(k) || /time|date/i.test(k);
   const allKeys = rows.length ? Object.keys(rows[0]) : [];
   const numKeys = allKeys.filter(k => {
     const v = rows[0][k];
@@ -583,7 +572,7 @@ function render(raw, rows) {
   });
 
   /* KPI cards — top 4 numeric columns, skip pure time fields */
-  const kpiCols = numKeys.filter(k => !IS_TIME(k)).slice(0, 4);
+  const kpiCols = numKeys.filter(k => !isTimeKey(k)).slice(0, 4);
   let kpiHtml = '';
   if (kpiCols.length) {
     kpiCols.forEach(col => {
@@ -628,6 +617,25 @@ function render(raw, rows) {
   mountChart(rows, numKeys);
 }
 
+/* ── Time-key helpers ── */
+function isTimeKey(k) {
+  return /^(time|timestamp|date|ts|datetime)$/i.test(k);
+}
+
+function hasValidTimeData(rows, timeKey) {
+  if (!timeKey || rows.length < 2) return false;
+  const samples = rows.slice(0, 10).map(r => r[timeKey]).filter(v => v != null);
+  if (samples.length < 2) return false;
+  const unique = new Set(samples).size;
+  if (unique < 2) return false;
+  // Verify at least one sample looks like a timestamp
+  for (const s of samples) {
+    if (typeof s === 'number' && s > 1e9) return true;
+    if (typeof s === 'string' && !isNaN(new Date(s).getTime())) return true;
+  }
+  return false;
+}
+
 /* ── Chart ── */
 function mountChart(rows, numKeys) {
   const host = $('chartHost');
@@ -637,7 +645,8 @@ function mountChart(rows, numKeys) {
   }
 
   const keys    = Object.keys(rows[0]);
-  const timeKey = keys.find(k => /^(time|t|date|timestamp|ts)$/i.test(k) || /time|date/i.test(k)) || null;
+  const timeKey = keys.find(isTimeKey) || null;
+  const isTimeSeries = hasValidTimeData(rows, timeKey);
 
   /* OHLC detection */
   const ohlc = (() => {
@@ -652,17 +661,15 @@ function mountChart(rows, numKeys) {
     return (m.o&&m.h&&m.l&&m.c) ? m : null;
   })();
 
-  if (timeKey || ohlc) {
+  if (isTimeSeries || ohlc) {
     const valCol = numKeys.find(k => k !== timeKey) || numKeys[0];
     mountLWC(host, rows, timeKey, ohlc, valCol);
   } else {
-    /* Use the endpoint's sort param as preferred value column (e.g. rsi4h, h4PriceChangePercent) */
     const ep = S.reg.find(e => e.id === S.id);
     const sortCol = ep?.params?.sort;
     const getSpread = k => Math.max(...rows.slice(0,30).map(r => Math.abs(parseFloat(r[k])||0)));
     const valCol = (sortCol && numKeys.includes(sortCol)) ? sortCol
                  : numKeys.slice(0,10).reduce((best,k) => getSpread(k) > getSpread(best) ? k : best, numKeys[0]);
-    /* Prefer canonical symbol/coin columns for labels */
     const lblKey = keys.find(k => /^(symbol|coin|basecoin|basesymbol|name|ticker)$/i.test(k))
                 || keys.find(k => typeof rows[0][k]==='string' && rows[0][k].length<30)
                 || null;
@@ -691,83 +698,94 @@ function mountLWC(host, rows, timeKey, ohlc, numCol) {
     </div>`;
 
   requestAnimationFrame(() => {
-  const mount = $('lwcMount');
-  if (!mount) return;
-  const w = Math.max(mount.clientWidth || 0, host.clientWidth || 0, 300);
+    const mount = $('lwcMount');
+    if (!mount) return;
 
-  S.chart = LightweightCharts.createChart(mount, {
-    layout: {
-      background:{color:'#07101C'},
-      textColor:'#5E7285',
-      fontFamily:"'IBM Plex Mono',monospace",
-      fontSize:11,
-    },
-    grid: {
-      vertLines:{color:'rgba(255,255,255,0.025)'},
-      horzLines:{color:'rgba(255,255,255,0.025)'},
-    },
-    crosshair: {
-      mode: LightweightCharts.CrosshairMode.Normal,
-      vertLine:{color:'rgba(240,164,22,0.3)', labelBackgroundColor:'#0C1828'},
-      horzLine:{color:'rgba(240,164,22,0.3)', labelBackgroundColor:'#0C1828'},
-    },
-    rightPriceScale:{borderColor:'rgba(255,255,255,0.06)'},
-    timeScale:{borderColor:'rgba(255,255,255,0.06)', timeVisible:true, secondsVisible:false},
-    width:w,
-    height:340,
+    // Use getBoundingClientRect for accurate dimensions even inside CSS grid
+    const rect = host.getBoundingClientRect();
+    const width = Math.max(rect.width, 200);
+    const height = Math.max(rect.height, 200);
+
+    S.chart = LightweightCharts.createChart(mount, {
+      layout: {
+        background:{color:'#07101C'},
+        textColor:'#5E7285',
+        fontFamily:"'IBM Plex Mono',monospace",
+        fontSize:11,
+      },
+      grid: {
+        vertLines:{color:'rgba(255,255,255,0.025)'},
+        horzLines:{color:'rgba(255,255,255,0.025)'},
+      },
+      crosshair: {
+        mode: LightweightCharts.CrosshairMode.Normal,
+        vertLine:{color:'rgba(240,164,22,0.3)', labelBackgroundColor:'#0C1828'},
+        horzLine:{color:'rgba(240,164,22,0.3)', labelBackgroundColor:'#0C1828'},
+      },
+      rightPriceScale:{borderColor:'rgba(255,255,255,0.06)'},
+      timeScale:{borderColor:'rgba(255,255,255,0.06)', timeVisible:true, secondsVisible:false},
+      width: width,
+      height: height,
+    });
+
+    // Observe the HOST (not mount) for accurate container resize
+    if (S.ro) { S.ro.disconnect(); }
+    S.ro = new ResizeObserver(entries => {
+      if (!S.chart) return;
+      for (const entry of entries) {
+        const cr = entry.contentRect;
+        S.chart.applyOptions({ width: cr.width, height: cr.height });
+      }
+    });
+    S.ro.observe(host);
+
+    if (ohlc) {
+      S.series = S.chart.addCandlestickSeries({
+        upColor:'#0EBA88', downColor:'#F4455A',
+        borderUpColor:'#0EBA88', borderDownColor:'#F4455A',
+        wickUpColor:'#0EBA88', wickDownColor:'#F4455A',
+      });
+      const data = dedup(
+        rows.map((r,i)=>({
+          time:  toUnix(timeKey ? r[timeKey] : null, i, rows.length),
+          open:  parseFloat(r[ohlc.o])||0,
+          high:  parseFloat(r[ohlc.h])||0,
+          low:   parseFloat(r[ohlc.l])||0,
+          close: parseFloat(r[ohlc.c])||0,
+        })).sort((a,b)=>a.time-b.time)
+      );
+      S.series.setData(data);
+      if (data.length) setLegendOHLC(data[data.length-1]);
+      S.chart.subscribeCrosshairMove(p => {
+        const bar = p.seriesData && p.seriesData.get(S.series);
+        setLegendOHLC(bar || data[data.length-1]);
+      });
+      if ($('chartPill')) $('chartPill').textContent = data.length+' bars';
+
+    } else {
+      S.series = S.chart.addAreaSeries({
+        topColor:'rgba(240,164,22,0.14)',
+        bottomColor:'rgba(240,164,22,0)',
+        lineColor:'#F0A416',
+        lineWidth:2,
+      });
+      const data = dedup(
+        rows.map((r,i)=>({
+          time:  toUnix(timeKey ? r[timeKey] : null, i, rows.length),
+          value: parseFloat(r[numCol])||0,
+        })).sort((a,b)=>a.time-b.time)
+      );
+      S.series.setData(data);
+      if (data.length) $('lgOhlc').innerHTML = `<span class="v">${fmt(data[data.length-1].value)}</span>`;
+      S.chart.subscribeCrosshairMove(p => {
+        const bar = p.seriesData && p.seriesData.get(S.series);
+        if (bar) $('lgOhlc').innerHTML = `<span class="v">${fmt(bar.value)}</span>`;
+      });
+      if ($('chartPill')) $('chartPill').textContent = data.length+' pts';
+    }
+
+    S.chart.timeScale().fitContent();
   });
-
-  if (ohlc) {
-    S.series = S.chart.addCandlestickSeries({
-      upColor:'#0EBA88', downColor:'#F4455A',
-      borderUpColor:'#0EBA88', borderDownColor:'#F4455A',
-      wickUpColor:'#0EBA88', wickDownColor:'#F4455A',
-    });
-    const data = dedup(
-      rows.map((r,i)=>({
-        time:  toUnix(timeKey ? r[timeKey] : null, i, rows.length),
-        open:  parseFloat(r[ohlc.o])||0,
-        high:  parseFloat(r[ohlc.h])||0,
-        low:   parseFloat(r[ohlc.l])||0,
-        close: parseFloat(r[ohlc.c])||0,
-      })).sort((a,b)=>a.time-b.time)
-    );
-    S.series.setData(data);
-    if (data.length) setLegendOHLC(data[data.length-1]);
-    S.chart.subscribeCrosshairMove(p => {
-      const bar = p.seriesData && p.seriesData.get(S.series);
-      setLegendOHLC(bar || data[data.length-1]);
-    });
-    $('chartPill') && ($('chartPill').textContent = data.length+' bars');
-
-  } else {
-    S.series = S.chart.addAreaSeries({
-      topColor:'rgba(240,164,22,0.14)',
-      bottomColor:'rgba(240,164,22,0)',
-      lineColor:'#F0A416',
-      lineWidth:2,
-    });
-    const data = dedup(
-      rows.map((r,i)=>({
-        time:  toUnix(timeKey ? r[timeKey] : null, i, rows.length),
-        value: parseFloat(r[numCol])||0,
-      })).sort((a,b)=>a.time-b.time)
-    );
-    S.series.setData(data);
-    if (data.length) $('lgOhlc').innerHTML = `<span class="v">${fmt(data[data.length-1].value)}</span>`;
-    S.chart.subscribeCrosshairMove(p => {
-      const bar = p.seriesData && p.seriesData.get(S.series);
-      if (bar) $('lgOhlc').innerHTML = `<span class="v">${fmt(bar.value)}</span>`;
-    });
-    $('chartPill') && ($('chartPill').textContent = data.length+' pts');
-  }
-
-  S.chart.timeScale().fitContent();
-
-  new ResizeObserver(()=>{
-    if (S.chart && mount.clientWidth>0) S.chart.applyOptions({width:mount.clientWidth});
-  }).observe(mount);
-  }); // end requestAnimationFrame
 }
 
 function setLegendOHLC(bar) {
@@ -800,7 +818,7 @@ function mountBarChart(host, rows, numCol, lblCol) {
   });
   h += '</div>';
   host.innerHTML = h;
-  $('chartPill') && ($('chartPill').textContent = 'bar chart');
+  if ($('chartPill')) $('chartPill').textContent = 'bar chart';
 }
 
 /* ── Table ── */
@@ -896,6 +914,7 @@ async function runExplorer() {
 
 /* ── Helpers ── */
 function destroyChart() {
+  if (S.ro) { S.ro.disconnect(); S.ro = null; }
   if (S.chart) { try{S.chart.remove();}catch(e){} S.chart=null; S.series=null; }
 }
 
@@ -924,9 +943,7 @@ function $(id) { return document.getElementById(id); }
 function smartExtract(raw) {
   if (Array.isArray(raw)) return raw;
   if (!raw || typeof raw !== 'object') return [];
-  // raw.data is a flat list
   if (Array.isArray(raw.data)) return raw.data;
-  // dig up to depth 3 for the largest array of objects or 2-tuples
   const found = [];
   function dig(obj, d) {
     if (d > 3) return;
@@ -940,7 +957,6 @@ function smartExtract(raw) {
   return found[0] || [];
 }
 
-/* ── Normalize: convert [[ts,val],...] 2D arrays into objects ── */
 function normalize(rows) {
   if (!rows.length) return rows;
   if (Array.isArray(rows[0])) {
