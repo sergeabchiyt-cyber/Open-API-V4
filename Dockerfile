@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 RUN pip install --no-cache-dir fastapi uvicorn[standard] httpx pycryptodome jinja2 aiofiles
 RUN mkdir -p /app/templates /app/static
-RUN wget -q -O /app/static/lwc.js \
+RUN curl -fsSL -o /app/static/lwc.js \
     "https://unpkg.com/lightweight-charts@4.1.7/dist/lightweight-charts.standalone.production.js"
 
 # ============================================================
