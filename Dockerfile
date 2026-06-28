@@ -8,7 +8,7 @@ RUN pip install --no-cache-dir fastapi uvicorn[standard] httpx pycryptodome jinj
 RUN mkdir -p /app/templates
 
 # ============================================================
-# decrypt.py  — fixed: validates derived key length + source material
+# decrypt.py
 # ============================================================
 RUN cat <<'PYEOF' > /app/decrypt.py
 import os, json, gzip, base64, time, logging
@@ -25,27 +25,12 @@ _KEY_TABLE = {
     "77": "863f08689c97435b",
 }
 
-# Allow runtime injection of extra keys, e.g.
-#   CAPI_EXTRA_KEYS="8=abc...,9=def..."
-# Skip empty values so a trailing comma doesn't break derivation.
 for _pair in os.environ.get("CAPI_EXTRA_KEYS", "").split(","):
     if "=" in _pair:
         _k, _v = _pair.strip().split("=", 1)
-        _k = _k.strip()
-        _v = _v.strip()
-        if _k and _v:
-            _KEY_TABLE[_k] = _v
-
+        _KEY_TABLE[_k.strip()] = _v.strip()
 
 def _derive_key0(v, url="", outer=None):
-    """Derive the 16-char AES key from the version + request/response context.
-
-    Versions:
-        "0" -> key derived from full URL
-        "1" -> key derived from URL path
-        "2" -> key derived from response['time']
-        other -> looked up in _KEY_TABLE (set via CAPI_EXTRA_KEYS)
-    """
     if v == "0":
         constant = url
     elif v == "1":
@@ -56,39 +41,15 @@ def _derive_key0(v, url="", outer=None):
         constant = _KEY_TABLE.get(v)
         if constant is None:
             raise ValueError(
-                f"Unknown encryption v={v!r}. Add the key via CAPI_EXTRA_KEYS, "
-                f"e.g. CAPI_EXTRA_KEYS={v}=<16-char-hex>"
+                f"Unknown encryption v={v}. "
+                f"Inject new key via CAPI_EXTRA_KEYS env var: '{v}=<16-char-hex>'"
             )
-
-    # ── FIX 1: catch empty source material before passing to base64/AES ──
-    if not constant:
-        raise ValueError(
-            f"Cannot derive AES key: empty source material for v={v!r} "
-            f"(url={url!r}, outer_keys={list((outer or {}).keys())})"
-        )
-
-    derived = base64.b64encode(constant.encode()).decode()[:16]
-
-    # ── FIX 2: validate derived length is exactly 16 chars (AES-128) ──
-    if len(derived) != 16:
-        raise ValueError(
-            f"Derived AES key has invalid length {len(derived)} (need 16) "
-            f"for v={v!r}. Source={constant!r}. "
-            f"If v is a known CoinGlass version, update CAPI_EXTRA_KEYS."
-        )
-
-    return derived
-
+    return base64.b64encode(constant.encode()).decode()[:16]
 
 def decrypt(body, user_b64, v, url=""):
     outer = json.loads(body)
     if "data" not in outer:
         return outer
-
-    if not user_b64 or not v:
-        # No encryption headers — caller will fall back to raw JSON
-        return outer
-
     payload = base64.b64decode(outer["data"])
     token   = base64.b64decode(user_b64)
     key0    = _derive_key0(v, url, outer)
@@ -96,7 +57,6 @@ def decrypt(body, user_b64, v, url=""):
     akey    = gzip.decompress(step1).decode()
     step2   = unpad(AES.new(akey.encode(), AES.MODE_ECB).decrypt(payload), 16)
     return json.loads(gzip.decompress(step2).decode())
-
 
 async def fetch_and_decrypt(url, params=None, timeout=15):
     headers = {
@@ -118,16 +78,11 @@ async def fetch_and_decrypt(url, params=None, timeout=15):
                 return r.json()
             except Exception:
                 return {"raw": r.text}
-        try:
-            return decrypt(r.text, user, v, url)
-        except ValueError as e:
-            # Re-raise with URL context so the dashboard's error panel
-            # can show exactly which endpoint broke.
-            raise ValueError(f"[{url}] {e}") from e
+        return decrypt(r.text, user, v, url)
 PYEOF
 
 # ============================================================
-# main.py — unchanged; already returns 200 on API errors
+# main.py — 200 status on API errors so client can read JSON
 # ============================================================
 RUN cat <<'PYEOF' > /app/main.py
 from fastapi import FastAPI, Request, HTTPException
@@ -273,8 +228,10 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
 ::-webkit-scrollbar-thumb { background:var(--t3); }
 ::-webkit-scrollbar-track { background:transparent; }
 
+/* ── App shell ── */
 .app { display:flex; height:100vh; }
 
+/* ── Sidebar ── */
 .sidebar {
   width:var(--sidebar); flex-shrink:0;
   background:var(--surface);
@@ -333,6 +290,7 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
   background:var(--elevated); padding:1px 4px;
 }
 
+/* ── Main ── */
 .main { flex:1; display:flex; flex-direction:column; overflow:hidden; }
 .topbar {
   height:var(--topbar); flex-shrink:0;
@@ -356,8 +314,10 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
 .btn-accent { background:var(--accent); color:var(--bg); border:none; font-weight:700; }
 .btn-accent:hover { opacity:0.88; }
 
+/* ── Content ── */
 .content { flex:1; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:12px; }
 
+/* ── KPI strip ── */
 .kpi-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:8px; }
 .kpi {
   background:var(--surface); border:1px solid var(--border);
@@ -371,9 +331,11 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
 .kpi-value { font-size:17px; font-weight:700; letter-spacing:-0.5px; }
 .kpi-sub   { font-size:10px; color:var(--t2); margin-top:3px; }
 
+/* ── Split panel ── */
 .split { display:grid; grid-template-columns:3fr 2fr; gap:12px; }
 @media(max-width:1080px) { .split { grid-template-columns:1fr; } }
 
+/* ── Panel ── */
 .panel { background:var(--surface); border:1px solid var(--border); display:flex; flex-direction:column; }
 .panel-head {
   padding:7px 12px; border-bottom:1px solid var(--border);
@@ -383,7 +345,9 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
 .panel-head h3 { font-size:9px; font-weight:700; text-transform:uppercase; color:var(--t2); letter-spacing:0.6px; }
 .panel-head .pill { font-size:9px; color:var(--t3); background:var(--elevated); padding:1px 5px; margin-left:auto; }
 
+/* ── Chart ── */
 .chart-host { position:relative; height:340px; overflow:hidden; }
+/* signature: subtle CRT scanline grid */
 .chart-host::after {
   content:''; position:absolute; inset:0; pointer-events:none; z-index:5;
   background:repeating-linear-gradient(
@@ -411,6 +375,7 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
 }
 .chart-empty-icon { font-size:28px; color:var(--t3); }
 
+/* ── Bar chart ── */
 .bar-chart { padding:10px 14px; display:flex; flex-direction:column; gap:5px; max-height:340px; overflow-y:auto; }
 .bar-row   { display:flex; align-items:center; gap:8px; }
 .bar-label { font-size:10px; color:var(--t2); width:72px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right; flex-shrink:0; }
@@ -420,6 +385,7 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
 .bar-fill.neg { background:var(--red-bg);   border-right-color:var(--red); }
 .bar-val { font-size:10px; color:var(--t1); width:68px; text-align:right; flex-shrink:0; }
 
+/* ── Table ── */
 .table-wrap { overflow:auto; max-height:340px; }
 table { width:100%; border-collapse:collapse; font-size:11px; font-family:var(--font); }
 th {
@@ -440,6 +406,7 @@ tr:hover td { background:rgba(255,255,255,0.015); }
 .up { color:var(--green) !important; }
 .dn { color:var(--red) !important; }
 
+/* ── Inspector ── */
 .inspector-toggle {
   padding:8px 12px; font-size:10px; color:var(--t2);
   cursor:pointer; display:flex; align-items:center; gap:6px;
@@ -452,6 +419,7 @@ tr:hover td { background:rgba(255,255,255,0.015); }
   border-top:1px solid var(--border); font-family:var(--font); white-space:pre;
 }
 
+/* ── Explorer ── */
 .explorer { background:var(--surface); border:1px solid var(--border); padding:14px; display:flex; flex-direction:column; gap:10px; }
 .form-row  { display:grid; grid-template-columns:2fr 3fr; gap:10px; }
 .field     { display:flex; flex-direction:column; gap:4px; }
@@ -464,6 +432,7 @@ tr:hover td { background:rgba(255,255,255,0.015); }
 .field input:focus, .field textarea:focus { border-color:var(--accent-br); }
 .field textarea { min-height:48px; resize:vertical; }
 
+/* ── States ── */
 .skeleton {
   background:linear-gradient(90deg, var(--surface) 25%, var(--elevated) 50%, var(--surface) 75%);
   background-size:200%; animation:shimmer 1.4s infinite;
@@ -481,6 +450,7 @@ tr:hover td { background:rgba(255,255,255,0.015); }
 <body>
 <div class="app">
 
+  <!-- Sidebar -->
   <aside class="sidebar">
     <div class="logo">
       <div class="logo-mark">CG</div>
@@ -493,6 +463,7 @@ tr:hover td { background:rgba(255,255,255,0.015); }
     <nav class="nav" id="nav"></nav>
   </aside>
 
+  <!-- Main workspace -->
   <div class="main">
     <div class="topbar">
       <span class="topbar-title" id="topTitle">Loading...</span>
@@ -510,8 +481,10 @@ tr:hover td { background:rgba(255,255,255,0.015); }
 
 </div>
 <script>
+/* ── State ── */
 const S = { id:null, reg:[], chart:null, series:null, sort:{col:null,dir:1} };
 
+/* ── Boot ── */
 async function boot() {
   try {
     const r = await fetch('/api/registry');
@@ -525,6 +498,7 @@ async function boot() {
   }
 }
 
+/* ── Nav ── */
 function buildNav() {
   const cats = {};
   S.reg.forEach(e => { (cats[e.cat] = cats[e.cat]||[]).push(e); });
@@ -560,6 +534,7 @@ function setActive(id) {
 
 function reload() { if (S.id && S.id !== 'explorer') loadEndpoint(S.id); }
 
+/* ── Load endpoint ── */
 async function loadEndpoint(id) {
   S.id = id;
   setActive(id);
@@ -577,6 +552,7 @@ async function loadEndpoint(id) {
   }
 }
 
+/* ── Skeleton ── */
 function showSkeleton() {
   destroyChart();
   $('content').innerHTML =
@@ -584,15 +560,19 @@ function showSkeleton() {
     '<div class="split"><div class="skeleton" style="height:360px"></div><div class="skeleton" style="height:360px"></div></div>';
 }
 
+/* ── Render ── */
 function render(raw, rows) {
   destroyChart();
+  if (!rows.length) rows = normalize(smartExtract(raw));
+  const IS_TIME = k => /^(time|t|date|timestamp|ts)$/i.test(k) || /time|date/i.test(k);
   const allKeys = rows.length ? Object.keys(rows[0]) : [];
   const numKeys = allKeys.filter(k => {
     const v = rows[0][k];
     return typeof v === 'number' || (!isNaN(parseFloat(v)) && v !== null && v !== '' && typeof v !== 'object');
   });
 
-  const kpiCols = numKeys.slice(0, 4);
+  /* KPI cards — top 4 numeric columns, skip pure time fields */
+  const kpiCols = numKeys.filter(k => !IS_TIME(k)).slice(0, 4);
   let kpiHtml = '';
   if (kpiCols.length) {
     kpiCols.forEach(col => {
@@ -637,6 +617,7 @@ function render(raw, rows) {
   mountChart(rows, numKeys);
 }
 
+/* ── Chart ── */
 function mountChart(rows, numKeys) {
   const host = $('chartHost');
   if (!host || !rows.length || !numKeys.length) {
@@ -647,6 +628,7 @@ function mountChart(rows, numKeys) {
   const keys    = Object.keys(rows[0]);
   const timeKey = keys.find(k => /^(time|t|date|timestamp|ts)$/i.test(k) || /time|date/i.test(k)) || null;
 
+  /* OHLC detection */
   const ohlc = (() => {
     const m = {};
     keys.forEach(k => {
@@ -660,7 +642,8 @@ function mountChart(rows, numKeys) {
   })();
 
   if (timeKey || ohlc) {
-    mountLWC(host, rows, timeKey, ohlc, numKeys[0]);
+    const valCol = numKeys.find(k => k !== timeKey) || numKeys[0];
+    mountLWC(host, rows, timeKey, ohlc, valCol);
   } else {
     const lblKey = keys.find(k => typeof rows[0][k]==='string' && rows[0][k].length<30) || null;
     mountBarChart(host, rows, numKeys[0], lblKey);
@@ -687,7 +670,10 @@ function mountLWC(host, rows, timeKey, ohlc, numCol) {
       <div class="lg-ohlc" id="lgOhlc"></div>
     </div>`;
 
+  requestAnimationFrame(() => {
   const mount = $('lwcMount');
+  if (!mount) return;
+  const w = Math.max(mount.clientWidth || 0, host.clientWidth || 0, 300);
 
   S.chart = LightweightCharts.createChart(mount, {
     layout: {
@@ -707,7 +693,7 @@ function mountLWC(host, rows, timeKey, ohlc, numCol) {
     },
     rightPriceScale:{borderColor:'rgba(255,255,255,0.06)'},
     timeScale:{borderColor:'rgba(255,255,255,0.06)', timeVisible:true, secondsVisible:false},
-    width:mount.clientWidth || host.clientWidth,
+    width:w,
     height:340,
   });
 
@@ -761,6 +747,7 @@ function mountLWC(host, rows, timeKey, ohlc, numCol) {
   new ResizeObserver(()=>{
     if (S.chart && mount.clientWidth>0) S.chart.applyOptions({width:mount.clientWidth});
   }).observe(mount);
+  }); // end requestAnimationFrame
 }
 
 function setLegendOHLC(bar) {
@@ -796,6 +783,7 @@ function mountBarChart(host, rows, numCol, lblCol) {
   $('chartPill') && ($('chartPill').textContent = 'bar chart');
 }
 
+/* ── Table ── */
 function buildTable(rows) {
   if (!rows.length) return '<div class="empty">No data returned</div>';
   const cols = Object.keys(rows[0]).slice(0,12);
@@ -837,12 +825,14 @@ function sortBy(col) {
   trs.forEach(r=>tbody.appendChild(r));
 }
 
+/* ── Inspector ── */
 function toggleInspector() {
   const b=$('iBody'), a=$('iArrow');
   b.style.display = b.style.display==='block' ? 'none' : 'block';
   a.textContent   = b.style.display==='block'  ? '▼'    : '▶';
 }
 
+/* ── Explorer ── */
 function showExplorer() {
   S.id='explorer'; setActive('explorer');
   $('topTitle').textContent='API Explorer';
@@ -884,6 +874,7 @@ async function runExplorer() {
   }
 }
 
+/* ── Helpers ── */
 function destroyChart() {
   if (S.chart) { try{S.chart.remove();}catch(e){} S.chart=null; S.series=null; }
 }
@@ -909,8 +900,42 @@ function errBox(title, msg) {
 
 function $(id) { return document.getElementById(id); }
 
+/* ── Smart extraction: handles nested CoinGlass data shapes ── */
+function smartExtract(raw) {
+  if (Array.isArray(raw)) return raw;
+  if (!raw || typeof raw !== 'object') return [];
+  // raw.data is a flat list
+  if (Array.isArray(raw.data)) return raw.data;
+  // dig up to depth 3 for the largest array of objects or 2-tuples
+  const found = [];
+  function dig(obj, d) {
+    if (d > 3) return;
+    for (const v of Object.values(obj)) {
+      if (Array.isArray(v) && v.length > 1) found.push(v);
+      else if (v && typeof v === 'object' && !Array.isArray(v)) dig(v, d+1);
+    }
+  }
+  dig(raw, 0);
+  found.sort((a,b) => b.length - a.length);
+  return found[0] || [];
+}
+
+/* ── Normalize: convert [[ts,val],...] 2D arrays into objects ── */
+function normalize(rows) {
+  if (!rows.length) return rows;
+  if (Array.isArray(rows[0])) {
+    return rows.map(r => r.length === 2
+      ? {time: r[0], value: r[1]}
+      : Object.fromEntries(r.map((v,i) => ['v'+i, v]))
+    );
+  }
+  return rows;
+}
+
+/* ── Clock ── */
 setInterval(()=>{ const c=$('clock'); if(c) c.textContent=new Date().toLocaleTimeString(); }, 1000);
 
+/* ── Go ── */
 boot();
 </script>
 </body>
