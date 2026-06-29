@@ -53,11 +53,36 @@ def decrypt(body, user_b64, v, url=""):
         return outer
     payload = base64.b64decode(outer["data"])
     token   = base64.b64decode(user_b64)
-    key0    = _derive_key0(v, url, outer)
-    step1   = unpad(AES.new(key0.encode(), AES.MODE_ECB).decrypt(token), 16)
-    akey    = gzip.decompress(step1).decode()
-    step2   = unpad(AES.new(akey.encode(), AES.MODE_ECB).decrypt(payload), 16)
-    return json.loads(gzip.decompress(step2).decode())
+
+    def _try(key0):
+        step1 = unpad(AES.new(key0.encode(), AES.MODE_ECB).decrypt(token), 16)
+        akey  = gzip.decompress(step1).decode()
+        step2 = unpad(AES.new(akey.encode(), AES.MODE_ECB).decrypt(payload), 16)
+        return json.loads(gzip.decompress(step2).decode())
+
+    def _mk(constant):
+        return base64.b64encode(constant.encode()).decode()[:16]
+
+    seen, candidates = set(), []
+    def add(k):
+        if k and len(k) == 16 and k not in seen:
+            seen.add(k); candidates.append(k)
+
+    try: add(_derive_key0(v, url, outer))
+    except ValueError: pass
+    for c in _KEY_TABLE.values(): add(_mk(c))
+    add(_mk(urlparse(url).path))
+    add(_mk(url))
+    add(_mk(str(outer.get("time", ""))))
+
+    for i, key0 in enumerate(candidates):
+        try:
+            result = _try(key0)
+            if i > 0: logger.warning(f"v={v}: primary key failed, fallback #{i} succeeded")
+            return result
+        except Exception:
+            continue
+    raise ValueError(f"All {len(candidates)} keys failed for v={v}. Set CAPI_EXTRA_KEYS.")
 
 async def fetch_and_decrypt(url, params=None, timeout=15):
     headers = {
@@ -199,7 +224,7 @@ if __name__ == "__main__":
 PYEOF
 
 # ============================================================
-# dashboard.html — chart visibility & sizing fixes
+# dashboard.html
 # ============================================================
 RUN cat <<'HTMLEOF' > /app/templates/dashboard.html
 <!DOCTYPE html>
@@ -219,11 +244,12 @@ RUN cat <<'HTMLEOF' > /app/templates/dashboard.html
   --border:   rgba(255,255,255,0.07);
   --border2:  rgba(255,255,255,0.13);
   --accent:   #F0A416;
-  --accent-dim:rgba(240,164,22,0.55);
+  --accent-bg:rgba(240,164,22,0.07);
+  --accent-br:rgba(240,164,22,0.25);
   --green:    #0EBA88;
-  --green-dim: rgba(14,186,136,0.55);
   --red:      #F4455A;
-  --red-dim:  rgba(244,69,90,0.55);
+  --green-bg: rgba(14,186,136,0.08);
+  --red-bg:   rgba(244,69,90,0.08);
   --t1: #DCE4EF;
   --t2: #5E7285;
   --t3: #2A3848;
@@ -271,7 +297,7 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
   padding:5px 8px; color:var(--t1);
   font-family:var(--font); font-size:11px; outline:none;
 }
-.nav-search input:focus { border-color:rgba(240,164,22,0.25); }
+.nav-search input:focus { border-color:var(--accent-br); }
 .nav { flex:1; overflow-y:auto; padding-bottom:8px; }
 .nav-cat {
   font-size:9px; font-weight:700; color:var(--t3);
@@ -288,7 +314,7 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
 .nav-item:hover { color:var(--t1); background:rgba(255,255,255,0.02); }
 .nav-item.active {
   color:var(--accent); border-left-color:var(--accent);
-  background:rgba(240,164,22,0.07);
+  background:var(--accent-bg);
 }
 .nav-dot { width:3px; height:3px; border-radius:50%; background:var(--t3); flex-shrink:0; }
 .nav-item.active .nav-dot { background:var(--accent); }
@@ -297,7 +323,7 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
   background:var(--elevated); padding:1px 4px;
 }
 
-.main { flex:1; display:flex; flex-direction:column; overflow:hidden; min-width:0; }
+.main { flex:1; display:flex; flex-direction:column; overflow:hidden; }
 .topbar {
   height:var(--topbar); flex-shrink:0;
   background:var(--surface);
@@ -320,7 +346,7 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
 .btn-accent { background:var(--accent); color:var(--bg); border:none; font-weight:700; }
 .btn-accent:hover { opacity:0.88; }
 
-.content { flex:1; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:12px; min-width:0; }
+.content { flex:1; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:12px; }
 
 .kpi-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:8px; }
 .kpi {
@@ -335,11 +361,10 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
 .kpi-value { font-size:17px; font-weight:700; letter-spacing:-0.5px; }
 .kpi-sub   { font-size:10px; color:var(--t2); margin-top:3px; }
 
-.split { display:grid; grid-template-columns:3fr 2fr; gap:12px; min-width:0; }
-.split > * { min-width:0; }
+.split { display:grid; grid-template-columns:3fr 2fr; gap:12px; }
 @media(max-width:1080px) { .split { grid-template-columns:1fr; } }
 
-.panel { background:var(--surface); border:1px solid var(--border); display:flex; flex-direction:column; min-width:0; }
+.panel { background:var(--surface); border:1px solid var(--border); display:flex; flex-direction:column; }
 .panel-head {
   padding:7px 12px; border-bottom:1px solid var(--border);
   display:flex; align-items:center; gap:8px;
@@ -348,9 +373,15 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
 .panel-head h3 { font-size:9px; font-weight:700; text-transform:uppercase; color:var(--t2); letter-spacing:0.6px; }
 .panel-head .pill { font-size:9px; color:var(--t3); background:var(--elevated); padding:1px 5px; margin-left:auto; }
 
-/* ── Chart host ── */
-.chart-host { position:relative; height:340px; width:100%; min-width:0; overflow:hidden; min-height:280px; }
-#lwcMount { position:absolute; top:0; left:0; width:100%; height:100%; }
+.chart-host { position:relative; height:clamp(320px,40vh,520px); overflow:hidden; }
+.chart-host::after {
+  content:''; position:absolute; inset:0; pointer-events:none; z-index:5;
+  background:repeating-linear-gradient(
+    0deg, transparent, transparent 3px,
+    rgba(0,0,0,0.04) 3px, rgba(0,0,0,0.04) 4px
+  );
+}
+#lwcMount { position:absolute; inset:0; }
 .chart-legend {
   position:absolute; top:10px; left:12px; z-index:10;
   pointer-events:none; font-size:11px; line-height:1.6;
@@ -367,19 +398,16 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
 }
 .chart-empty-icon { font-size:28px; color:var(--t3); }
 
-/* ── Bar chart (high visibility) ── */
-.bar-chart { padding:14px; display:flex; flex-direction:column; gap:8px; height:100%; overflow-y:auto; }
-.bar-row   { display:flex; align-items:center; gap:10px; width:100%; }
-.bar-row:hover .bar-track { background:rgba(255,255,255,0.06); }
-.bar-label { font-size:11px; color:var(--t2); width:80px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right; flex-shrink:0; font-weight:500; }
-.bar-track { flex:1; height:24px; background:rgba(255,255,255,0.04); position:relative; overflow:hidden; min-width:0; border-radius:4px; }
-.bar-fill  { height:100%; background:var(--accent-dim); border-right:3px solid var(--accent); border-radius:0 4px 4px 0; transition:width 0.4s cubic-bezier(0.4,0,0.2,1); }
-.bar-fill.pos { background:var(--green-dim); border-right-color:var(--green); }
-.bar-fill.neg { background:var(--red-dim);   border-right-color:var(--red); }
-.bar-val { font-size:11px; color:var(--t1); width:80px; text-align:right; flex-shrink:0; font-weight:600; }
+.bar-chart { padding:10px 14px; display:flex; flex-direction:column; gap:5px; height:100%; overflow-y:auto; }
+.bar-row   { display:flex; align-items:center; gap:8px; }
+.bar-label { font-size:10px; color:var(--t2); width:72px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right; flex-shrink:0; }
+.bar-track { flex:1; height:16px; background:var(--elevated); position:relative; overflow:hidden; }
+.bar-fill  { height:100%; background:var(--accent-bg); border-right:2px solid var(--accent); transition:width 0.35s cubic-bezier(0.4,0,0.2,1); }
+.bar-fill.pos { background:var(--green-bg); border-right-color:var(--green); }
+.bar-fill.neg { background:var(--red-bg);   border-right-color:var(--red); }
+.bar-val { font-size:10px; color:var(--t1); width:68px; text-align:right; flex-shrink:0; }
 
-/* ── Table ── */
-.table-wrap { overflow:auto; max-height:340px; }
+.table-wrap { overflow:auto; max-height:clamp(320px,40vh,520px); }
 table { width:100%; border-collapse:collapse; font-size:11px; font-family:var(--font); }
 th {
   position:sticky; top:0; z-index:2;
@@ -399,7 +427,6 @@ tr:hover td { background:rgba(255,255,255,0.015); }
 .up { color:var(--green) !important; }
 .dn { color:var(--red) !important; }
 
-/* ── Inspector ── */
 .inspector-toggle {
   padding:8px 12px; font-size:10px; color:var(--t2);
   cursor:pointer; display:flex; align-items:center; gap:6px;
@@ -412,7 +439,6 @@ tr:hover td { background:rgba(255,255,255,0.015); }
   border-top:1px solid var(--border); font-family:var(--font); white-space:pre;
 }
 
-/* ── Explorer ── */
 .explorer { background:var(--surface); border:1px solid var(--border); padding:14px; display:flex; flex-direction:column; gap:10px; }
 .form-row  { display:grid; grid-template-columns:2fr 3fr; gap:10px; }
 .field     { display:flex; flex-direction:column; gap:4px; }
@@ -422,7 +448,7 @@ tr:hover td { background:rgba(255,255,255,0.015); }
   padding:6px 9px; color:var(--t1);
   font-family:var(--font); font-size:11px; outline:none;
 }
-.field input:focus, .field textarea:focus { border-color:rgba(240,164,22,0.25); }
+.field input:focus, .field textarea:focus { border-color:var(--accent-br); }
 .field textarea { min-height:48px; resize:vertical; }
 
 .skeleton {
@@ -431,7 +457,7 @@ tr:hover td { background:rgba(255,255,255,0.015); }
 }
 @keyframes shimmer { 0%{background-position:-200%0} 100%{background-position:200%0} }
 .error {
-  background:rgba(244,69,90,0.08); border:1px solid rgba(244,69,90,0.2);
+  background:var(--red-bg); border:1px solid rgba(244,69,90,0.2);
   padding:14px; color:var(--red);
 }
 .error strong { display:block; margin-bottom:6px; font-size:13px; }
@@ -468,7 +494,7 @@ tr:hover td { background:rgba(255,255,255,0.015); }
   </div>
 </div>
 <script>
-const S = { id:null, reg:[], chart:null, series:null, sort:{col:null,dir:1}, ro:null };
+const S = { id:null, reg:[], chart:null, series:null, sort:{col:null,dir:1} };
 
 async function boot() {
   try {
@@ -545,13 +571,14 @@ function showSkeleton() {
 function render(raw, rows) {
   destroyChart();
   if (!rows.length) rows = normalize(smartExtract(raw));
+  const IS_TIME = k => /^(time|t|date|timestamp|ts)$/i.test(k) || /time|date/i.test(k);
   const allKeys = rows.length ? Object.keys(rows[0]) : [];
   const numKeys = allKeys.filter(k => {
     const v = rows[0][k];
     return typeof v === 'number' || (!isNaN(parseFloat(v)) && v !== null && v !== '' && typeof v !== 'object');
   });
 
-  const kpiCols = numKeys.filter(k => !isTimeKey(k)).slice(0, 4);
+  const kpiCols = numKeys.filter(k => !IS_TIME(k)).slice(0, 4);
   let kpiHtml = '';
   if (kpiCols.length) {
     kpiCols.forEach(col => {
@@ -596,32 +623,15 @@ function render(raw, rows) {
   mountChart(rows, numKeys);
 }
 
-function isTimeKey(k) {
-  return /^(time|timestamp|date|ts|datetime)$/i.test(k);
-}
-
-function hasValidTimeData(rows, timeKey) {
-  if (!timeKey || rows.length < 2) return false;
-  const samples = rows.slice(0, 10).map(r => r[timeKey]).filter(v => v != null);
-  if (samples.length < 2) return false;
-  const unique = new Set(samples).size;
-  if (unique < 2) return false;
-  for (const s of samples) {
-    if (typeof s === 'number' && s > 1e9) return true;
-    if (typeof s === 'string' && !isNaN(new Date(s).getTime())) return true;
-  }
-  return false;
-}
-
 function mountChart(rows, numKeys) {
   const host = $('chartHost');
   if (!host || !rows.length || !numKeys.length) {
     if (host) host.innerHTML = '<div class="chart-empty"><div class="chart-empty-icon">∅</div>No chartable data</div>';
     return;
   }
-  const keys = Object.keys(rows[0]);
-  const timeKey = keys.find(isTimeKey) || null;
-  const isTimeSeries = hasValidTimeData(rows, timeKey);
+
+  const keys    = Object.keys(rows[0]);
+  const timeKey = keys.find(k => /^(time|t|date|timestamp|ts)$/i.test(k) || /time|date/i.test(k)) || null;
 
   const ohlc = (() => {
     const m = {};
@@ -635,15 +645,22 @@ function mountChart(rows, numKeys) {
     return (m.o&&m.h&&m.l&&m.c) ? m : null;
   })();
 
-  if (isTimeSeries || ohlc) {
+  if (timeKey || ohlc) {
     const valCol = numKeys.find(k => k !== timeKey) || numKeys[0];
     mountLWC(host, rows, timeKey, ohlc, valCol);
   } else {
     const ep = S.reg.find(e => e.id === S.id);
     const sortCol = ep?.params?.sort;
     const getSpread = k => Math.max(...rows.slice(0,30).map(r => Math.abs(parseFloat(r[k])||0)));
-    const valCol = (sortCol && numKeys.includes(sortCol)) ? sortCol
-                 : numKeys.slice(0,10).reduce((best,k) => getSpread(k) > getSpread(best) ? k : best, numKeys[0]);
+    let valCol;
+    if (sortCol && numKeys.includes(sortCol)) {
+      valCol = sortCol;
+    } else {
+      const rateCols = numKeys.filter(k => /rate|apr|rsi|percent|change|pct|ratio/i.test(k) && getSpread(k) > 0);
+      valCol = rateCols.length
+        ? rateCols.reduce((best, k) => getSpread(k) > getSpread(best) ? k : best, rateCols[0])
+        : numKeys.slice(0,10).reduce((best, k) => getSpread(k) > getSpread(best) ? k : best, numKeys[0]);
+    }
     const lblKey = keys.find(k => /^(symbol|coin|basecoin|basesymbol|name|ticker)$/i.test(k))
                 || keys.find(k => typeof rows[0][k]==='string' && rows[0][k].length<30)
                 || null;
@@ -665,86 +682,88 @@ function dedup(data) {
 
 function mountLWC(host, rows, timeKey, ohlc, numCol) {
   host.innerHTML = `
-    <div id="lwcMount" style="width:100%;height:100%;position:absolute;top:0;left:0;"></div>
+    <div id="lwcMount"></div>
     <div class="chart-legend">
       <div class="lg-name" id="lgName">${ohlc ? 'OHLC' : esc(numCol)}</div>
       <div class="lg-ohlc" id="lgOhlc"></div>
     </div>`;
 
   requestAnimationFrame(() => {
-    const mount = $('lwcMount');
-    if (!mount) return;
-    const rect = host.getBoundingClientRect();
-    if (rect.width < 100 || rect.height < 100) {
-      host.style.height = '340px';
-    }
+  const mount = $('lwcMount');
+  if (!mount) return;
+  const w = Math.max(mount.clientWidth || 0, host.clientWidth || 0, 300);
 
-    S.chart = LightweightCharts.createChart(mount, {
-      autoSize: true,
-      layout: {
-        background:{color:'#07101C'},
-        textColor:'#5E7285',
-        fontFamily:"'IBM Plex Mono',monospace",
-        fontSize:11,
-      },
-      grid: {
-        vertLines:{color:'rgba(255,255,255,0.025)'},
-        horzLines:{color:'rgba(255,255,255,0.025)'},
-      },
-      crosshair: {
-        mode: LightweightCharts.CrosshairMode.Normal,
-        vertLine:{color:'rgba(240,164,22,0.3)', labelBackgroundColor:'#0C1828'},
-        horzLine:{color:'rgba(240,164,22,0.3)', labelBackgroundColor:'#0C1828'},
-      },
-      rightPriceScale:{borderColor:'rgba(255,255,255,0.06)'},
-      timeScale:{borderColor:'rgba(255,255,255,0.06)', timeVisible:true, secondsVisible:false, rightOffset:4},
+  S.chart = LightweightCharts.createChart(mount, {
+    layout: {
+      background:{color:'#07101C'},
+      textColor:'#5E7285',
+      fontFamily:"'IBM Plex Mono',monospace",
+      fontSize:11,
+    },
+    grid: {
+      vertLines:{color:'rgba(255,255,255,0.025)'},
+      horzLines:{color:'rgba(255,255,255,0.025)'},
+    },
+    crosshair: {
+      mode: LightweightCharts.CrosshairMode.Normal,
+      vertLine:{color:'rgba(240,164,22,0.3)', labelBackgroundColor:'#0C1828'},
+      horzLine:{color:'rgba(240,164,22,0.3)', labelBackgroundColor:'#0C1828'},
+    },
+    rightPriceScale:{borderColor:'rgba(255,255,255,0.06)'},
+    timeScale:{borderColor:'rgba(255,255,255,0.06)', timeVisible:true, secondsVisible:false},
+    width:w,
+    height: host.clientHeight || 380,
+  });
+
+  if (ohlc) {
+    S.series = S.chart.addCandlestickSeries({
+      upColor:'#0EBA88', downColor:'#F4455A',
+      borderUpColor:'#0EBA88', borderDownColor:'#F4455A',
+      wickUpColor:'#0EBA88', wickDownColor:'#F4455A',
     });
+    const data = dedup(
+      rows.map((r,i)=>({
+        time:  toUnix(timeKey ? r[timeKey] : null, i, rows.length),
+        open:  parseFloat(r[ohlc.o])||0,
+        high:  parseFloat(r[ohlc.h])||0,
+        low:   parseFloat(r[ohlc.l])||0,
+        close: parseFloat(r[ohlc.c])||0,
+      })).sort((a,b)=>a.time-b.time)
+    );
+    S.series.setData(data);
+    if (data.length) setLegendOHLC(data[data.length-1]);
+    S.chart.subscribeCrosshairMove(p => {
+      const bar = p.seriesData && p.seriesData.get(S.series);
+      setLegendOHLC(bar || data[data.length-1]);
+    });
+    $('chartPill') && ($('chartPill').textContent = data.length+' bars');
+  } else {
+    S.series = S.chart.addAreaSeries({
+      topColor:'rgba(240,164,22,0.14)',
+      bottomColor:'rgba(240,164,22,0)',
+      lineColor:'#F0A416',
+      lineWidth:2,
+    });
+    const data = dedup(
+      rows.map((r,i)=>({
+        time:  toUnix(timeKey ? r[timeKey] : null, i, rows.length),
+        value: parseFloat(r[numCol])||0,
+      })).sort((a,b)=>a.time-b.time)
+    );
+    S.series.setData(data);
+    if (data.length) $('lgOhlc').innerHTML = `<span class="v">${fmt(data[data.length-1].value)}</span>`;
+    S.chart.subscribeCrosshairMove(p => {
+      const bar = p.seriesData && p.seriesData.get(S.series);
+      if (bar) $('lgOhlc').innerHTML = `<span class="v">${fmt(bar.value)}</span>`;
+    });
+    $('chartPill') && ($('chartPill').textContent = data.length+' pts');
+  }
 
-    if (ohlc) {
-      S.series = S.chart.addCandlestickSeries({
-        upColor:'#0EBA88', downColor:'#F4455A',
-        borderUpColor:'#0EBA88', borderDownColor:'#F4455A',
-        wickUpColor:'#0EBA88', wickDownColor:'#F4455A',
-        borderVisible:true, wickVisible:true,
-      });
-      const data = dedup(
-        rows.map((r,i)=>({
-          time:  toUnix(timeKey ? r[timeKey] : null, i, rows.length),
-          open:  parseFloat(r[ohlc.o])||0,
-          high:  parseFloat(r[ohlc.h])||0,
-          low:   parseFloat(r[ohlc.l])||0,
-          close: parseFloat(r[ohlc.c])||0,
-        })).sort((a,b)=>a.time-b.time)
-      );
-      S.series.setData(data);
-      if (data.length) setLegendOHLC(data[data.length-1]);
-      S.chart.subscribeCrosshairMove(p => {
-        const bar = p.seriesData && p.seriesData.get(S.series);
-        setLegendOHLC(bar || data[data.length-1]);
-      });
-      if ($('chartPill')) $('chartPill').textContent = data.length+' bars';
-    } else {
-      S.series = S.chart.addAreaSeries({
-        topColor:'rgba(240,164,22,0.40)',
-        bottomColor:'rgba(240,164,22,0.06)',
-        lineColor:'#F0A416',
-        lineWidth:2.5,
-      });
-      const data = dedup(
-        rows.map((r,i)=>({
-          time:  toUnix(timeKey ? r[timeKey] : null, i, rows.length),
-          value: parseFloat(r[numCol])||0,
-        })).sort((a,b)=>a.time-b.time)
-      );
-      S.series.setData(data);
-      if (data.length) $('lgOhlc').innerHTML = `<span class="v">${fmt(data[data.length-1].value)}</span>`;
-      S.chart.subscribeCrosshairMove(p => {
-        const bar = p.seriesData && p.seriesData.get(S.series);
-        if (bar) $('lgOhlc').innerHTML = `<span class="v">${fmt(bar.value)}</span>`;
-      });
-      if ($('chartPill')) $('chartPill').textContent = data.length+' pts';
-    }
-    S.chart.timeScale().fitContent();
+  S.chart.timeScale().fitContent();
+
+  new ResizeObserver(()=>{
+    if (S.chart && mount.clientWidth>0) S.chart.applyOptions({width:mount.clientWidth});
+  }).observe(mount);
   });
 }
 
@@ -778,7 +797,7 @@ function mountBarChart(host, rows, numCol, lblCol) {
   });
   h += '</div>';
   host.innerHTML = h;
-  if ($('chartPill')) $('chartPill').textContent = 'bar chart';
+  $('chartPill') && ($('chartPill').textContent = 'bar chart');
 }
 
 function buildTable(rows) {
@@ -870,7 +889,6 @@ async function runExplorer() {
 }
 
 function destroyChart() {
-  if (S.ro) { S.ro.disconnect(); S.ro = null; }
   if (S.chart) { try{S.chart.remove();}catch(e){} S.chart=null; S.series=null; }
 }
 
