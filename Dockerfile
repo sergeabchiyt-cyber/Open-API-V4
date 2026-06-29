@@ -83,7 +83,7 @@ async def fetch_and_decrypt(url, params=None, timeout=15):
 PYEOF
 
 # ============================================================
-# main.py — 200 status on API errors so client can read JSON
+# main.py
 # ============================================================
 RUN cat <<'PYEOF' > /app/main.py
 from fastapi import FastAPI, Request, HTTPException
@@ -143,7 +143,6 @@ REGISTRY = [
 def extract(d):
     if isinstance(d, list): return d
     if isinstance(d, dict):
-        # CoinGlass time-series pattern: {dateList:[ms,...], dataMap:{exchange:[val,...]}}
         if "dateList" in d and "dataMap" in d:
             dates   = d["dateList"]
             datamap = d["dataMap"]
@@ -156,7 +155,7 @@ def extract(d):
             v = d[k]
             if isinstance(v, list): return v
             if isinstance(v, dict):
-                nested = extract(v)   # recurse handles dateList+dataMap inside data.{}
+                nested = extract(v)
                 if nested: return nested
     return []
 
@@ -200,7 +199,7 @@ if __name__ == "__main__":
 PYEOF
 
 # ============================================================
-# dashboard.html — chart sizing & rendering fixes
+# dashboard.html — chart visibility & sizing fixes
 # ============================================================
 RUN cat <<'HTMLEOF' > /app/templates/dashboard.html
 <!DOCTYPE html>
@@ -220,12 +219,11 @@ RUN cat <<'HTMLEOF' > /app/templates/dashboard.html
   --border:   rgba(255,255,255,0.07);
   --border2:  rgba(255,255,255,0.13);
   --accent:   #F0A416;
-  --accent-bg:rgba(240,164,22,0.07);
-  --accent-br:rgba(240,164,22,0.25);
+  --accent-dim:rgba(240,164,22,0.55);
   --green:    #0EBA88;
+  --green-dim: rgba(14,186,136,0.55);
   --red:      #F4455A;
-  --green-bg: rgba(14,186,136,0.08);
-  --red-bg:   rgba(244,69,90,0.08);
+  --red-dim:  rgba(244,69,90,0.55);
   --t1: #DCE4EF;
   --t2: #5E7285;
   --t3: #2A3848;
@@ -239,10 +237,8 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
 ::-webkit-scrollbar-thumb { background:var(--t3); }
 ::-webkit-scrollbar-track { background:transparent; }
 
-/* ── App shell ── */
 .app { display:flex; height:100vh; }
 
-/* ── Sidebar ── */
 .sidebar {
   width:var(--sidebar); flex-shrink:0;
   background:var(--surface);
@@ -275,7 +271,7 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
   padding:5px 8px; color:var(--t1);
   font-family:var(--font); font-size:11px; outline:none;
 }
-.nav-search input:focus { border-color:var(--accent-br); }
+.nav-search input:focus { border-color:rgba(240,164,22,0.25); }
 .nav { flex:1; overflow-y:auto; padding-bottom:8px; }
 .nav-cat {
   font-size:9px; font-weight:700; color:var(--t3);
@@ -292,7 +288,7 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
 .nav-item:hover { color:var(--t1); background:rgba(255,255,255,0.02); }
 .nav-item.active {
   color:var(--accent); border-left-color:var(--accent);
-  background:var(--accent-bg);
+  background:rgba(240,164,22,0.07);
 }
 .nav-dot { width:3px; height:3px; border-radius:50%; background:var(--t3); flex-shrink:0; }
 .nav-item.active .nav-dot { background:var(--accent); }
@@ -301,7 +297,6 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
   background:var(--elevated); padding:1px 4px;
 }
 
-/* ── Main ── */
 .main { flex:1; display:flex; flex-direction:column; overflow:hidden; min-width:0; }
 .topbar {
   height:var(--topbar); flex-shrink:0;
@@ -325,10 +320,8 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
 .btn-accent { background:var(--accent); color:var(--bg); border:none; font-weight:700; }
 .btn-accent:hover { opacity:0.88; }
 
-/* ── Content ── */
 .content { flex:1; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:12px; min-width:0; }
 
-/* ── KPI strip ── */
 .kpi-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:8px; }
 .kpi {
   background:var(--surface); border:1px solid var(--border);
@@ -342,12 +335,10 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
 .kpi-value { font-size:17px; font-weight:700; letter-spacing:-0.5px; }
 .kpi-sub   { font-size:10px; color:var(--t2); margin-top:3px; }
 
-/* ── Split panel ── */
 .split { display:grid; grid-template-columns:3fr 2fr; gap:12px; min-width:0; }
 .split > * { min-width:0; }
 @media(max-width:1080px) { .split { grid-template-columns:1fr; } }
 
-/* ── Panel ── */
 .panel { background:var(--surface); border:1px solid var(--border); display:flex; flex-direction:column; min-width:0; }
 .panel-head {
   padding:7px 12px; border-bottom:1px solid var(--border);
@@ -357,8 +348,8 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
 .panel-head h3 { font-size:9px; font-weight:700; text-transform:uppercase; color:var(--t2); letter-spacing:0.6px; }
 .panel-head .pill { font-size:9px; color:var(--t3); background:var(--elevated); padding:1px 5px; margin-left:auto; }
 
-/* ── Chart ── */
-.chart-host { position:relative; height:340px; width:100%; min-width:0; overflow:hidden; }
+/* ── Chart host ── */
+.chart-host { position:relative; height:340px; width:100%; min-width:0; overflow:hidden; min-height:280px; }
 #lwcMount { position:absolute; top:0; left:0; width:100%; height:100%; }
 .chart-legend {
   position:absolute; top:10px; left:12px; z-index:10;
@@ -370,21 +361,22 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
 .lg-ohlc .up { color:var(--green); }
 .lg-ohlc .dn { color:var(--red); }
 .chart-empty {
-  height:340px; display:flex; flex-direction:column;
+  height:100%; display:flex; flex-direction:column;
   align-items:center; justify-content:center; gap:8px;
   color:var(--t2); font-size:11px;
 }
 .chart-empty-icon { font-size:28px; color:var(--t3); }
 
-/* ── Bar chart ── */
-.bar-chart { padding:10px 14px; display:flex; flex-direction:column; gap:5px; height:100%; overflow-y:auto; }
-.bar-row   { display:flex; align-items:center; gap:8px; width:100%; }
-.bar-label { font-size:10px; color:var(--t2); width:72px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right; flex-shrink:0; }
-.bar-track { flex:1; height:16px; background:var(--elevated); position:relative; overflow:hidden; min-width:0; }
-.bar-fill  { height:100%; background:var(--accent-bg); border-right:2px solid var(--accent); transition:width 0.35s cubic-bezier(0.4,0,0.2,1); }
-.bar-fill.pos { background:var(--green-bg); border-right-color:var(--green); }
-.bar-fill.neg { background:var(--red-bg);   border-right-color:var(--red); }
-.bar-val { font-size:10px; color:var(--t1); width:68px; text-align:right; flex-shrink:0; }
+/* ── Bar chart (high visibility) ── */
+.bar-chart { padding:14px; display:flex; flex-direction:column; gap:8px; height:100%; overflow-y:auto; }
+.bar-row   { display:flex; align-items:center; gap:10px; width:100%; }
+.bar-row:hover .bar-track { background:rgba(255,255,255,0.06); }
+.bar-label { font-size:11px; color:var(--t2); width:80px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right; flex-shrink:0; font-weight:500; }
+.bar-track { flex:1; height:24px; background:rgba(255,255,255,0.04); position:relative; overflow:hidden; min-width:0; border-radius:4px; }
+.bar-fill  { height:100%; background:var(--accent-dim); border-right:3px solid var(--accent); border-radius:0 4px 4px 0; transition:width 0.4s cubic-bezier(0.4,0,0.2,1); }
+.bar-fill.pos { background:var(--green-dim); border-right-color:var(--green); }
+.bar-fill.neg { background:var(--red-dim);   border-right-color:var(--red); }
+.bar-val { font-size:11px; color:var(--t1); width:80px; text-align:right; flex-shrink:0; font-weight:600; }
 
 /* ── Table ── */
 .table-wrap { overflow:auto; max-height:340px; }
@@ -430,17 +422,16 @@ tr:hover td { background:rgba(255,255,255,0.015); }
   padding:6px 9px; color:var(--t1);
   font-family:var(--font); font-size:11px; outline:none;
 }
-.field input:focus, .field textarea:focus { border-color:var(--accent-br); }
+.field input:focus, .field textarea:focus { border-color:rgba(240,164,22,0.25); }
 .field textarea { min-height:48px; resize:vertical; }
 
-/* ── States ── */
 .skeleton {
   background:linear-gradient(90deg, var(--surface) 25%, var(--elevated) 50%, var(--surface) 75%);
   background-size:200%; animation:shimmer 1.4s infinite;
 }
 @keyframes shimmer { 0%{background-position:-200%0} 100%{background-position:200%0} }
 .error {
-  background:var(--red-bg); border:1px solid rgba(244,69,90,0.2);
+  background:rgba(244,69,90,0.08); border:1px solid rgba(244,69,90,0.2);
   padding:14px; color:var(--red);
 }
 .error strong { display:block; margin-bottom:6px; font-size:13px; }
@@ -450,8 +441,6 @@ tr:hover td { background:rgba(255,255,255,0.015); }
 </head>
 <body>
 <div class="app">
-
-  <!-- Sidebar -->
   <aside class="sidebar">
     <div class="logo">
       <div class="logo-mark">CG</div>
@@ -463,8 +452,6 @@ tr:hover td { background:rgba(255,255,255,0.015); }
     </div>
     <nav class="nav" id="nav"></nav>
   </aside>
-
-  <!-- Main workspace -->
   <div class="main">
     <div class="topbar">
       <span class="topbar-title" id="topTitle">Loading...</span>
@@ -479,13 +466,10 @@ tr:hover td { background:rgba(255,255,255,0.015); }
       <div class="empty">Initializing...</div>
     </div>
   </div>
-
 </div>
 <script>
-/* ── State ── */
 const S = { id:null, reg:[], chart:null, series:null, sort:{col:null,dir:1}, ro:null };
 
-/* ── Boot ── */
 async function boot() {
   try {
     const r = await fetch('/api/registry');
@@ -499,7 +483,6 @@ async function boot() {
   }
 }
 
-/* ── Nav ── */
 function buildNav() {
   const cats = {};
   S.reg.forEach(e => { (cats[e.cat] = cats[e.cat]||[]).push(e); });
@@ -535,7 +518,6 @@ function setActive(id) {
 
 function reload() { if (S.id && S.id !== 'explorer') loadEndpoint(S.id); }
 
-/* ── Load endpoint ── */
 async function loadEndpoint(id) {
   S.id = id;
   setActive(id);
@@ -553,7 +535,6 @@ async function loadEndpoint(id) {
   }
 }
 
-/* ── Skeleton ── */
 function showSkeleton() {
   destroyChart();
   $('content').innerHTML =
@@ -561,7 +542,6 @@ function showSkeleton() {
     '<div class="split"><div class="skeleton" style="height:360px"></div><div class="skeleton" style="height:360px"></div></div>';
 }
 
-/* ── Render ── */
 function render(raw, rows) {
   destroyChart();
   if (!rows.length) rows = normalize(smartExtract(raw));
@@ -571,7 +551,6 @@ function render(raw, rows) {
     return typeof v === 'number' || (!isNaN(parseFloat(v)) && v !== null && v !== '' && typeof v !== 'object');
   });
 
-  /* KPI cards — top 4 numeric columns, skip pure time fields */
   const kpiCols = numKeys.filter(k => !isTimeKey(k)).slice(0, 4);
   let kpiHtml = '';
   if (kpiCols.length) {
@@ -617,7 +596,6 @@ function render(raw, rows) {
   mountChart(rows, numKeys);
 }
 
-/* ── Time-key helpers ── */
 function isTimeKey(k) {
   return /^(time|timestamp|date|ts|datetime)$/i.test(k);
 }
@@ -628,7 +606,6 @@ function hasValidTimeData(rows, timeKey) {
   if (samples.length < 2) return false;
   const unique = new Set(samples).size;
   if (unique < 2) return false;
-  // Verify at least one sample looks like a timestamp
   for (const s of samples) {
     if (typeof s === 'number' && s > 1e9) return true;
     if (typeof s === 'string' && !isNaN(new Date(s).getTime())) return true;
@@ -636,19 +613,16 @@ function hasValidTimeData(rows, timeKey) {
   return false;
 }
 
-/* ── Chart ── */
 function mountChart(rows, numKeys) {
   const host = $('chartHost');
   if (!host || !rows.length || !numKeys.length) {
     if (host) host.innerHTML = '<div class="chart-empty"><div class="chart-empty-icon">∅</div>No chartable data</div>';
     return;
   }
-
-  const keys    = Object.keys(rows[0]);
+  const keys = Object.keys(rows[0]);
   const timeKey = keys.find(isTimeKey) || null;
   const isTimeSeries = hasValidTimeData(rows, timeKey);
 
-  /* OHLC detection */
   const ohlc = (() => {
     const m = {};
     keys.forEach(k => {
@@ -691,7 +665,7 @@ function dedup(data) {
 
 function mountLWC(host, rows, timeKey, ohlc, numCol) {
   host.innerHTML = `
-    <div id="lwcMount"></div>
+    <div id="lwcMount" style="width:100%;height:100%;position:absolute;top:0;left:0;"></div>
     <div class="chart-legend">
       <div class="lg-name" id="lgName">${ohlc ? 'OHLC' : esc(numCol)}</div>
       <div class="lg-ohlc" id="lgOhlc"></div>
@@ -700,13 +674,13 @@ function mountLWC(host, rows, timeKey, ohlc, numCol) {
   requestAnimationFrame(() => {
     const mount = $('lwcMount');
     if (!mount) return;
-
-    // Use getBoundingClientRect for accurate dimensions even inside CSS grid
     const rect = host.getBoundingClientRect();
-    const width = Math.max(rect.width, 200);
-    const height = Math.max(rect.height, 200);
+    if (rect.width < 100 || rect.height < 100) {
+      host.style.height = '340px';
+    }
 
     S.chart = LightweightCharts.createChart(mount, {
+      autoSize: true,
       layout: {
         background:{color:'#07101C'},
         textColor:'#5E7285',
@@ -723,27 +697,15 @@ function mountLWC(host, rows, timeKey, ohlc, numCol) {
         horzLine:{color:'rgba(240,164,22,0.3)', labelBackgroundColor:'#0C1828'},
       },
       rightPriceScale:{borderColor:'rgba(255,255,255,0.06)'},
-      timeScale:{borderColor:'rgba(255,255,255,0.06)', timeVisible:true, secondsVisible:false},
-      width: width,
-      height: height,
+      timeScale:{borderColor:'rgba(255,255,255,0.06)', timeVisible:true, secondsVisible:false, rightOffset:4},
     });
-
-    // Observe the HOST (not mount) for accurate container resize
-    if (S.ro) { S.ro.disconnect(); }
-    S.ro = new ResizeObserver(entries => {
-      if (!S.chart) return;
-      for (const entry of entries) {
-        const cr = entry.contentRect;
-        S.chart.applyOptions({ width: cr.width, height: cr.height });
-      }
-    });
-    S.ro.observe(host);
 
     if (ohlc) {
       S.series = S.chart.addCandlestickSeries({
         upColor:'#0EBA88', downColor:'#F4455A',
         borderUpColor:'#0EBA88', borderDownColor:'#F4455A',
         wickUpColor:'#0EBA88', wickDownColor:'#F4455A',
+        borderVisible:true, wickVisible:true,
       });
       const data = dedup(
         rows.map((r,i)=>({
@@ -761,13 +723,12 @@ function mountLWC(host, rows, timeKey, ohlc, numCol) {
         setLegendOHLC(bar || data[data.length-1]);
       });
       if ($('chartPill')) $('chartPill').textContent = data.length+' bars';
-
     } else {
       S.series = S.chart.addAreaSeries({
-        topColor:'rgba(240,164,22,0.14)',
-        bottomColor:'rgba(240,164,22,0)',
+        topColor:'rgba(240,164,22,0.40)',
+        bottomColor:'rgba(240,164,22,0.06)',
         lineColor:'#F0A416',
-        lineWidth:2,
+        lineWidth:2.5,
       });
       const data = dedup(
         rows.map((r,i)=>({
@@ -783,7 +744,6 @@ function mountLWC(host, rows, timeKey, ohlc, numCol) {
       });
       if ($('chartPill')) $('chartPill').textContent = data.length+' pts';
     }
-
     S.chart.timeScale().fitContent();
   });
 }
@@ -821,7 +781,6 @@ function mountBarChart(host, rows, numCol, lblCol) {
   if ($('chartPill')) $('chartPill').textContent = 'bar chart';
 }
 
-/* ── Table ── */
 function buildTable(rows) {
   if (!rows.length) return '<div class="empty">No data returned</div>';
   const cols = Object.keys(rows[0]).slice(0,12);
@@ -863,14 +822,12 @@ function sortBy(col) {
   trs.forEach(r=>tbody.appendChild(r));
 }
 
-/* ── Inspector ── */
 function toggleInspector() {
   const b=$('iBody'), a=$('iArrow');
   b.style.display = b.style.display==='block' ? 'none' : 'block';
   a.textContent   = b.style.display==='block'  ? '▼'    : '▶';
 }
 
-/* ── Explorer ── */
 function showExplorer() {
   S.id='explorer'; setActive('explorer');
   $('topTitle').textContent='API Explorer';
@@ -912,7 +869,6 @@ async function runExplorer() {
   }
 }
 
-/* ── Helpers ── */
 function destroyChart() {
   if (S.ro) { S.ro.disconnect(); S.ro = null; }
   if (S.chart) { try{S.chart.remove();}catch(e){} S.chart=null; S.series=null; }
@@ -939,7 +895,6 @@ function errBox(title, msg) {
 
 function $(id) { return document.getElementById(id); }
 
-/* ── Smart extraction: handles nested CoinGlass data shapes ── */
 function smartExtract(raw) {
   if (Array.isArray(raw)) return raw;
   if (!raw || typeof raw !== 'object') return [];
@@ -968,10 +923,8 @@ function normalize(rows) {
   return rows;
 }
 
-/* ── Clock ── */
 setInterval(()=>{ const c=$('clock'); if(c) c.textContent=new Date().toLocaleTimeString(); }, 1000);
 
-/* ── Go ── */
 boot();
 </script>
 </body>
