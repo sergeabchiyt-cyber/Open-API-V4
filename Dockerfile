@@ -227,47 +227,44 @@ async def _browser_fetch_decrypt(url: str, params: dict) -> dict:
                     except Exception:
                         pass
 
-            # ── Stage 2: direct fetch from CG browser context ─────────────
-            raw = await page.evaluate(
-                """
-                async ([targetUrl]) => {
-                    try {
-                        const r = await fetch(targetUrl, {
-                            credentials: "include",
-                            headers: {
-                                "encryption":  "true",
-                                "cache-ts-v2": String(Date.now()),
-                                "language":    "en",
-                                "Origin":      "https://www.coinglass.com",
-                                "Referer":     "https://www.coinglass.com/"
-                            }
-                        });
-                        return {
-                            ok:   true,
-                            user: r.headers.get("user"),
-                            v:    r.headers.get("v"),
-                            body: await r.text()
-                        };
-                    } catch(e) {
-                        return { ok: false, error: String(e) };
-                    }
-                }
-                """,
-                [full],
-            )
+            # ── Stage 2: context-level request — same cookies, no CORS ─────
+            # In-page fetch() to a different origin with custom headers
+            # (encryption, cache-ts-v2) forces a CORS preflight. If CG's CDN
+            # rejects it, the browser throws "TypeError: Failed to fetch"
+            # before any response is visible to JS — that's what prod logs
+            # showed. context.request shares the page's cookie jar (so any
+            # Cloudflare clearance / session cookies from page.goto() still
+            # apply) but runs outside the browser's fetch/CORS enforcement.
+            try:
+                resp = await context.request.get(
+                    full,
+                    timeout=15_000,
+                    headers={
+                        "Accept":      "application/json, text/plain, */*",
+                        "encryption":  "true",
+                        "cache-ts-v2": str(int(time.time() * 1000)),
+                        "language":    "en",
+                        "Origin":      "https://www.coinglass.com",
+                        "Referer":     "https://www.coinglass.com/",
+                    },
+                )
+                body_text = await resp.text()
+                user_h    = resp.headers.get("user")
+                v_h       = resp.headers.get("v")
+                status    = resp.status
+            except Exception as e:
+                await browser.close()
+                raise ValueError(f"browser-context request error: {e}")
+
             await browser.close()
 
-        if not raw.get("ok"):
-            raise ValueError(f"browser fetch error: {raw.get('error')}")
+        if not all([body_text, user_h, v_h]):
+            raise ValueError(
+                f"browser-context request incomplete: status={status}, "
+                f"v={v_h!r}, user_present={bool(user_h)}"
+            )
 
-        b = raw.get("body", "")
-        u = raw.get("user", "")
-        v2 = raw.get("v", "")
-
-        if not all([b, u, v2]):
-            raise ValueError(f"browser returned incomplete fields: v={v2!r}")
-
-        return decrypt(b, u, v2, full)
+        return decrypt(body_text, user_h, v_h, full)
 
 
 # ── Public entry-point ─────────────────────────────────────────────────────────
@@ -302,7 +299,6 @@ async def fetch_and_decrypt(
     except ValueError as e:
         logger.warning("static decrypt failed (%s) → browser fallback", e)
         return await _browser_fetch_decrypt(url, params or {})
-
 PYEOF
 
 # ============================================================
@@ -420,7 +416,6 @@ async def explore(req: Request):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=10000)
-
 PYEOF2
 
 # ============================================================
@@ -467,10 +462,8 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
 ::-webkit-scrollbar-thumb { background:var(--t3); border-radius:2px; }
 ::-webkit-scrollbar-track { background:transparent; }
 
-/* ── Layout ──────────────────────────────────────────────────────────────── */
 .app   { display:flex; height:100vh; }
 
-/* ── Sidebar ─────────────────────────────────────────────────────────────── */
 .sidebar {
   width:var(--sidebar); flex-shrink:0;
   background:var(--surface);
@@ -546,7 +539,6 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
 }
 .nav-item.active .nav-badge { color:var(--accent); background:var(--accent-bg); }
 
-/* ── Main ────────────────────────────────────────────────────────────────── */
 .main { flex:1; display:flex; flex-direction:column; overflow:hidden; min-width:0; }
 
 .topbar {
@@ -586,10 +578,8 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
 .btn-accent { background:var(--accent); color:var(--bg); border:none; font-weight:700; }
 .btn-accent:hover { opacity:0.88; }
 
-/* ── Content ─────────────────────────────────────────────────────────────── */
 .content { flex:1; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:10px; }
 
-/* ── KPI row ─────────────────────────────────────────────────────────────── */
 .kpi-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:8px; }
 .kpi {
   background:var(--surface);
@@ -605,11 +595,9 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
 .kpi-value { font-size:17px; font-weight:700; letter-spacing:-0.5px; line-height:1.1; }
 .kpi-sub   { font-size:10px; color:var(--t2); margin-top:4px; letter-spacing:0.01em; }
 
-/* ── Split ───────────────────────────────────────────────────────────────── */
 .split { display:grid; grid-template-columns:3fr 2fr; gap:10px; min-height:0; }
 @media(max-width:1080px) { .split { grid-template-columns:1fr; } }
 
-/* ── Panel ───────────────────────────────────────────────────────────────── */
 .panel {
   background:var(--surface); border:1px solid var(--border);
   display:flex; flex-direction:column; min-height:0;
@@ -631,7 +619,6 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
   margin-left:auto; letter-spacing:0;
 }
 
-/* ── Chart ───────────────────────────────────────────────────────────────── */
 .chart-host {
   position:relative;
   height:clamp(360px, 44vh, 540px);
@@ -662,7 +649,6 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
 }
 .chart-empty-icon { font-size:26px; color:var(--t3); }
 
-/* ── Bar chart ───────────────────────────────────────────────────────────── */
 .bar-chart { padding:10px 14px; display:flex; flex-direction:column; gap:6px; overflow-y:auto; height:100%; }
 .bar-row   { display:flex; align-items:center; gap:8px; }
 .bar-label {
@@ -680,7 +666,6 @@ body { background:var(--bg); color:var(--t1); font-family:var(--font); font-size
 .bar-fill.neg { background:var(--red-bg);   border-right-color:var(--red); }
 .bar-val { font-size:10px; color:var(--t1); width:72px; text-align:right; flex-shrink:0; letter-spacing:0; font-variant-numeric:tabular-nums; }
 
-/* ── Table ───────────────────────────────────────────────────────────────── */
 .table-wrap { overflow:auto; max-height:clamp(360px, 44vh, 540px); }
 table { width:100%; border-collapse:collapse; font-size:11px; }
 thead tr { position:sticky; top:0; z-index:2; }
@@ -707,7 +692,6 @@ tr:hover td { background:rgba(255,255,255,0.018); }
 .dn { color:var(--red)   !important; }
 td.num { font-variant-numeric:tabular-nums; text-align:right; }
 
-/* ── Raw JSON inspector ──────────────────────────────────────────────────── */
 .inspector-toggle {
   padding:8px 13px; font-size:10px; color:var(--t2);
   cursor:pointer; display:flex; align-items:center; gap:7px;
@@ -722,7 +706,6 @@ td.num { font-variant-numeric:tabular-nums; text-align:right; }
   font-family:var(--font); white-space:pre; line-height:1.6;
 }
 
-/* ── Explorer ────────────────────────────────────────────────────────────── */
 .explorer { background:var(--surface); border:1px solid var(--border); padding:14px; display:flex; flex-direction:column; gap:10px; }
 .form-row  { display:grid; grid-template-columns:2fr 3fr; gap:10px; }
 .field     { display:flex; flex-direction:column; gap:4px; }
@@ -735,7 +718,6 @@ td.num { font-variant-numeric:tabular-nums; text-align:right; }
 .field input:focus, .field textarea:focus { border-color:var(--accent-br); }
 .field textarea { min-height:48px; resize:vertical; }
 
-/* ── Skeleton / error / empty ────────────────────────────────────────────── */
 .skeleton {
   background:linear-gradient(90deg, var(--surface) 25%, var(--elevated) 50%, var(--surface) 75%);
   background-size:200% 100%;
@@ -784,13 +766,8 @@ td.num { font-variant-numeric:tabular-nums; text-align:right; }
 
 </div>
 <script>
-/* ─── State ──────────────────────────────────────────────────────────────── */
-const S = {
-  id: null, reg: [], chart: null, series: null,
-  sort: { col: null, dir: 1 }
-};
+const S = { id: null, reg: [], chart: null, series: null, sort: { col: null, dir: 1 } };
 
-/* ─── Bootstrap ──────────────────────────────────────────────────────────── */
 async function boot() {
   try {
     const r = await fetch('/api/registry');
@@ -804,7 +781,6 @@ async function boot() {
   }
 }
 
-/* ─── Nav ────────────────────────────────────────────────────────────────── */
 function buildNav() {
   const cats = {};
   S.reg.forEach(e => { (cats[e.cat] = cats[e.cat] || []).push(e); });
@@ -843,10 +819,8 @@ function setActive(id) {
 
 function reload() { if (S.id && S.id !== 'explorer') loadEndpoint(S.id); }
 
-/* ─── Load endpoint ──────────────────────────────────────────────────────── */
 async function loadEndpoint(id) {
-  S.id = id;
-  setActive(id);
+  S.id = id; setActive(id);
   const ep = S.reg.find(e => e.id === id);
   $('topTitle').textContent = ep?.label || id;
   $('topPath').textContent  = ep?.path  || id;
@@ -864,28 +838,18 @@ async function loadEndpoint(id) {
 function showSkeleton() {
   destroyChart();
   $('content').innerHTML =
-    '<div class="kpi-row">' +
-      Array(4).fill('<div class="skeleton" style="height:70px"></div>').join('') +
-    '</div>' +
-    '<div class="split">' +
-      '<div class="skeleton" style="height:380px"></div>' +
-      '<div class="skeleton" style="height:380px"></div>' +
-    '</div>';
+    '<div class="kpi-row">' + Array(4).fill('<div class="skeleton" style="height:70px"></div>').join('') + '</div>' +
+    '<div class="split"><div class="skeleton" style="height:380px"></div><div class="skeleton" style="height:380px"></div></div>';
 }
 
-/* ─── Render ─────────────────────────────────────────────────────────────── */
 function render(raw, rows) {
   destroyChart();
   if (!rows.length) rows = normalize(smartExtract(raw));
-
   const allKeys = rows.length ? Object.keys(rows[0]) : [];
   const numKeys = allKeys.filter(k => {
     const v = rows[0]?.[k];
-    return typeof v === 'number' ||
-      (v !== null && v !== '' && typeof v !== 'object' && !isNaN(parseFloat(v)));
+    return typeof v === 'number' || (v !== null && v !== '' && typeof v !== 'object' && !isNaN(parseFloat(v)));
   });
-
-  /* KPI cards */
   const kpiCols = numKeys.filter(k => !isTimeKey(k)).slice(0, 4);
   let kpiHtml = '';
   if (kpiCols.length) {
@@ -894,20 +858,10 @@ function render(raw, rows) {
       if (!vals.length) return;
       const mx = Math.max(...vals), mn = Math.min(...vals);
       const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
-      kpiHtml += `<div class="kpi">
-        <div class="kpi-label">${fmtCol(col)}</div>
-        <div class="kpi-value">${fmt(mx)}</div>
-        <div class="kpi-sub">min ${fmt(mn)} · avg ${fmt(avg)}</div>
-      </div>`;
+      kpiHtml += `<div class="kpi"><div class="kpi-label">${fmtCol(col)}</div><div class="kpi-value">${fmt(mx)}</div><div class="kpi-sub">min ${fmt(mn)} · avg ${fmt(avg)}</div></div>`;
     });
   }
-  if (!kpiHtml) {
-    kpiHtml = `<div class="kpi">
-      <div class="kpi-label">Records</div>
-      <div class="kpi-value">${rows.length}</div>
-      <div class="kpi-sub">rows in response</div>
-    </div>`;
-  }
+  if (!kpiHtml) kpiHtml = `<div class="kpi"><div class="kpi-label">Records</div><div class="kpi-value">${rows.length}</div><div class="kpi-sub">rows in response</div></div>`;
 
   $('content').innerHTML = `
     <div class="kpi-row">${kpiHtml}</div>
@@ -922,19 +876,13 @@ function render(raw, rows) {
       </div>
     </div>
     <div class="panel" style="margin-top:0">
-      <div class="inspector-toggle" onclick="toggleInspector()">
-        <span id="iArrow">▶</span><span>Raw JSON</span>
-      </div>
+      <div class="inspector-toggle" onclick="toggleInspector()"><span id="iArrow">▶</span><span>Raw JSON</span></div>
       <div class="inspector-body" id="iBody">${esc(JSON.stringify(raw, null, 2))}</div>
     </div>`;
-
   mountChart(rows, numKeys);
 }
 
-/* ─── Chart ──────────────────────────────────────────────────────────────── */
-function isTimeKey(k) {
-  return /^(time|t|date|timestamp|ts)$/i.test(k) || /time|date/i.test(k);
-}
+function isTimeKey(k) { return /^(time|t|date|timestamp|ts)$/i.test(k) || /time|date/i.test(k); }
 
 function mountChart(rows, numKeys) {
   const host = $('chartHost');
@@ -942,401 +890,219 @@ function mountChart(rows, numKeys) {
     if (host) host.innerHTML = '<div class="chart-empty"><div class="chart-empty-icon">∅</div>No chartable data</div>';
     return;
   }
-
   const keys    = Object.keys(rows[0]);
   const timeKey = keys.find(isTimeKey) || null;
-
   const ohlc = (() => {
     const m = {};
     keys.forEach(k => {
       const l = k.toLowerCase();
-      if (l === 'open'  || l === 'o') m.o = k;
-      if (l === 'high'  || l === 'h') m.h = k;
-      if (l === 'low'   || l === 'l') m.l = k;
-      if (l === 'close' || l === 'c') m.c = k;
+      if (l==='open'||l==='o') m.o=k; if (l==='high'||l==='h') m.h=k;
+      if (l==='low'||l==='l') m.l=k;  if (l==='close'||l==='c') m.c=k;
     });
-    return (m.o && m.h && m.l && m.c) ? m : null;
+    return (m.o&&m.h&&m.l&&m.c) ? m : null;
   })();
-
   if (timeKey || ohlc) {
-    const valCol = numKeys.find(k => k !== timeKey) || numKeys[0];
-    mountLWC(host, rows, timeKey, ohlc, valCol);
+    mountLWC(host, rows, timeKey, ohlc, numKeys.find(k => k !== timeKey) || numKeys[0]);
   } else {
-    /* Horizontal bar chart */
-    const ep      = S.reg.find(e => e.id === S.id);
+    const ep = S.reg.find(e => e.id === S.id);
     const sortCol = ep?.params?.sort;
-    const spread  = k => Math.max(...rows.slice(0, 30).map(r => Math.abs(parseFloat(r[k]) || 0)));
+    const spread = k => Math.max(...rows.slice(0,30).map(r => Math.abs(parseFloat(r[k])||0)));
     let valCol;
-    if (sortCol && numKeys.includes(sortCol)) {
-      valCol = sortCol;
-    } else {
-      const rateCols = numKeys.filter(k => /rate|apr|rsi|percent|change|pct|ratio/i.test(k) && spread(k) > 0);
-      valCol = rateCols.length
-        ? rateCols.reduce((best, k) => spread(k) > spread(best) ? k : best, rateCols[0])
-        : numKeys.slice(0, 10).reduce((best, k) => spread(k) > spread(best) ? k : best, numKeys[0]);
+    if (sortCol && numKeys.includes(sortCol)) { valCol = sortCol; }
+    else {
+      const rc = numKeys.filter(k => /rate|apr|rsi|percent|change|pct|ratio/i.test(k) && spread(k)>0);
+      valCol = rc.length ? rc.reduce((b,k) => spread(k)>spread(b)?k:b, rc[0])
+                         : numKeys.slice(0,10).reduce((b,k) => spread(k)>spread(b)?k:b, numKeys[0]);
     }
-    const lblKey =
-      keys.find(k => /^(symbol|coin|baseCoin|baseSym|name|ticker)$/i.test(k)) ||
-      keys.find(k => typeof rows[0][k] === 'string' && rows[0][k].length < 24) ||
-      null;
+    const lblKey = keys.find(k => /^(symbol|coin|baseCoin|baseSym|name|ticker)$/i.test(k))
+                || keys.find(k => typeof rows[0][k]==='string' && rows[0][k].length<24) || null;
     mountBarChart(host, rows, valCol, lblKey);
   }
 }
 
 function toUnix(v, i, n) {
-  if (v == null) return Math.floor(Date.now() / 1000) - (n - i) * 3600;
-  if (typeof v === 'number') return v > 1e11 ? Math.floor(v / 1000) : v;
-  const d = new Date(v);
-  return isNaN(d) ? Math.floor(Date.now() / 1000) - (n - i) * 3600 : Math.floor(d / 1000);
+  if (v==null) return Math.floor(Date.now()/1000)-(n-i)*3600;
+  if (typeof v==='number') return v>1e11 ? Math.floor(v/1000) : v;
+  const d=new Date(v); return isNaN(d) ? Math.floor(Date.now()/1000)-(n-i)*3600 : Math.floor(d/1000);
 }
-
-function dedup(data) {
-  const seen = new Set();
-  return data.filter(d => { if (seen.has(d.time)) return false; seen.add(d.time); return true; });
-}
+function dedup(data) { const s=new Set(); return data.filter(d=>{if(s.has(d.time))return false;s.add(d.time);return true;}); }
 
 function mountLWC(host, rows, timeKey, ohlc, numCol) {
-  host.innerHTML = `
-    <div id="lwcMount"></div>
-    <div class="chart-legend">
-      <div class="lg-name" id="lgName">${ohlc ? 'OHLC' : fmtCol(numCol)}</div>
-      <div class="lg-ohlc" id="lgOhlc"></div>
-    </div>`;
-
+  host.innerHTML = `<div id="lwcMount"></div><div class="chart-legend"><div class="lg-name" id="lgName">${ohlc?'OHLC':fmtCol(numCol)}</div><div class="lg-ohlc" id="lgOhlc"></div></div>`;
   requestAnimationFrame(() => {
     const mount = $('lwcMount');
     if (!mount) return;
-    const w = Math.max(mount.clientWidth || 0, host.clientWidth || 0, 300);
-    const h = Math.max(host.clientHeight || 0, 360);
-
+    const w = Math.max(mount.clientWidth||0, host.clientWidth||0, 300);
+    const h = Math.max(host.clientHeight||0, 360);
     S.chart = LightweightCharts.createChart(mount, {
-      width: w,
-      height: h,
-      layout: {
-        background:  { color: '#070E18' },
-        textColor:   '#4E6478',
-        fontFamily:  "'IBM Plex Mono', monospace",
-        fontSize:    11,
-      },
-      grid: {
-        vertLines: { color: 'rgba(255,255,255,0.022)' },
-        horzLines: { color: 'rgba(255,255,255,0.022)' },
-      },
-      crosshair: {
-        mode: LightweightCharts.CrosshairMode.Normal,
-        vertLine: { color: 'rgba(240,164,22,0.35)', labelBackgroundColor: '#0B1624' },
-        horzLine: { color: 'rgba(240,164,22,0.35)', labelBackgroundColor: '#0B1624' },
-      },
-      rightPriceScale: { borderColor: 'rgba(255,255,255,0.05)' },
-      timeScale:       { borderColor: 'rgba(255,255,255,0.05)', timeVisible: true, secondsVisible: false },
+      width: w, height: h,
+      layout: { background:{color:'#070E18'}, textColor:'#4E6478', fontFamily:"'IBM Plex Mono',monospace", fontSize:11 },
+      grid: { vertLines:{color:'rgba(255,255,255,0.022)'}, horzLines:{color:'rgba(255,255,255,0.022)'} },
+      crosshair: { mode:LightweightCharts.CrosshairMode.Normal, vertLine:{color:'rgba(240,164,22,0.35)',labelBackgroundColor:'#0B1624'}, horzLine:{color:'rgba(240,164,22,0.35)',labelBackgroundColor:'#0B1624'} },
+      rightPriceScale:{borderColor:'rgba(255,255,255,0.05)'},
+      timeScale:{borderColor:'rgba(255,255,255,0.05)',timeVisible:true,secondsVisible:false},
     });
-
     if (ohlc) {
-      S.series = S.chart.addCandlestickSeries({
-        upColor:        '#0DC989', downColor:        '#F4455A',
-        borderUpColor:  '#0DC989', borderDownColor:  '#F4455A',
-        wickUpColor:    '#0DC989', wickDownColor:    '#F4455A',
-      });
-      const data = dedup(
-        rows.map((r, i) => ({
-          time:  toUnix(timeKey ? r[timeKey] : null, i, rows.length),
-          open:  parseFloat(r[ohlc.o]) || 0,
-          high:  parseFloat(r[ohlc.h]) || 0,
-          low:   parseFloat(r[ohlc.l]) || 0,
-          close: parseFloat(r[ohlc.c]) || 0,
-        })).sort((a, b) => a.time - b.time)
-      );
+      S.series = S.chart.addCandlestickSeries({upColor:'#0DC989',downColor:'#F4455A',borderUpColor:'#0DC989',borderDownColor:'#F4455A',wickUpColor:'#0DC989',wickDownColor:'#F4455A'});
+      const data = dedup(rows.map((r,i)=>({time:toUnix(timeKey?r[timeKey]:null,i,rows.length),open:parseFloat(r[ohlc.o])||0,high:parseFloat(r[ohlc.h])||0,low:parseFloat(r[ohlc.l])||0,close:parseFloat(r[ohlc.c])||0})).sort((a,b)=>a.time-b.time));
       S.series.setData(data);
-      if (data.length) setLegendOHLC(data[data.length - 1]);
-      S.chart.subscribeCrosshairMove(p => {
-        const bar = p.seriesData?.get(S.series);
-        setLegendOHLC(bar || data[data.length - 1]);
-      });
-      $('chartPill') && ($('chartPill').textContent = data.length + ' bars');
-
+      if (data.length) setLegendOHLC(data[data.length-1]);
+      S.chart.subscribeCrosshairMove(p=>{const bar=p.seriesData?.get(S.series);setLegendOHLC(bar||data[data.length-1]);});
+      $('chartPill')&&($('chartPill').textContent=data.length+' bars');
     } else {
-      S.series = S.chart.addAreaSeries({
-        topColor:    'rgba(240,164,22,0.30)',
-        bottomColor: 'rgba(240,164,22,0.02)',
-        lineColor:   '#F0A416',
-        lineWidth:   2,
-        priceLineVisible: true,
-        priceLineColor:   'rgba(240,164,22,0.4)',
-      });
-      const data = dedup(
-        rows.map((r, i) => ({
-          time:  toUnix(timeKey ? r[timeKey] : null, i, rows.length),
-          value: parseFloat(r[numCol]) || 0,
-        })).sort((a, b) => a.time - b.time)
-      );
+      S.series = S.chart.addAreaSeries({topColor:'rgba(240,164,22,0.30)',bottomColor:'rgba(240,164,22,0.02)',lineColor:'#F0A416',lineWidth:2,priceLineVisible:true,priceLineColor:'rgba(240,164,22,0.4)'});
+      const data = dedup(rows.map((r,i)=>({time:toUnix(timeKey?r[timeKey]:null,i,rows.length),value:parseFloat(r[numCol])||0})).sort((a,b)=>a.time-b.time));
       S.series.setData(data);
-      if (data.length) $('lgOhlc').innerHTML = `<span class="v">${fmt(data[data.length - 1].value)}</span>`;
-      S.chart.subscribeCrosshairMove(p => {
-        const bar = p.seriesData?.get(S.series);
-        if (bar) $('lgOhlc').innerHTML = `<span class="v">${fmt(bar.value)}</span>`;
-      });
-      $('chartPill') && ($('chartPill').textContent = data.length + ' pts');
+      if (data.length) $('lgOhlc').innerHTML=`<span class="v">${fmt(data[data.length-1].value)}</span>`;
+      S.chart.subscribeCrosshairMove(p=>{const bar=p.seriesData?.get(S.series);if(bar)$('lgOhlc').innerHTML=`<span class="v">${fmt(bar.value)}</span>`;});
+      $('chartPill')&&($('chartPill').textContent=data.length+' pts');
     }
-
     S.chart.timeScale().fitContent();
-
-    new ResizeObserver(() => {
-      if (S.chart && mount.clientWidth > 0) {
-        S.chart.applyOptions({ width: mount.clientWidth, height: host.clientHeight });
-      }
-    }).observe(mount);
+    new ResizeObserver(()=>{ if(S.chart&&mount.clientWidth>0) S.chart.applyOptions({width:mount.clientWidth,height:host.clientHeight}); }).observe(mount);
   });
 }
 
 function setLegendOHLC(bar) {
-  if (!bar || bar.close == null) return;
-  const d = bar.close - bar.open;
-  const cls = d >= 0 ? 'up' : 'dn';
-  $('lgOhlc').innerHTML =
-    `O <span class="v">${fmt(bar.open)}</span> ` +
-    `H <span class="v">${fmt(bar.high)}</span> ` +
-    `L <span class="v">${fmt(bar.low)}</span> ` +
-    `C <span class="v ${cls}">${fmt(bar.close)}</span> ` +
-    `<span class="${cls}">${d >= 0 ? '+' : ''}${fmt(d)}</span>`;
+  if (!bar||bar.close==null) return;
+  const d=bar.close-bar.open, cls=d>=0?'up':'dn';
+  $('lgOhlc').innerHTML=`O <span class="v">${fmt(bar.open)}</span> H <span class="v">${fmt(bar.high)}</span> L <span class="v">${fmt(bar.low)}</span> C <span class="v ${cls}">${fmt(bar.close)}</span> <span class="${cls}">${d>=0?'+':''}${fmt(d)}</span>`;
 }
 
 function mountBarChart(host, rows, numCol, lblCol) {
-  const top    = rows.slice(0, 30);
-  const vals   = top.map(r => parseFloat(r[numCol]) || 0);
-  const maxAbs = Math.max(...vals.map(Math.abs), 1e-9);
-
-  let h = `<div class="bar-chart"><div style="font-size:9px;color:var(--t2);letter-spacing:.8px;text-transform:uppercase;padding:2px 0 6px;flex-shrink:0">${fmtCol(numCol)}</div>`;
-  top.forEach(r => {
-    const v   = parseFloat(r[numCol]) || 0;
-    const pct = (Math.abs(v) / maxAbs * 100).toFixed(1);
-    const lbl = lblCol ? String(r[lblCol]).slice(0, 10) : '';
-    const cls = v > 0 ? 'pos' : v < 0 ? 'neg' : '';
-    h += `<div class="bar-row">
-      <div class="bar-label">${esc(lbl)}</div>
-      <div class="bar-track"><div class="bar-fill ${cls}" style="width:${pct}%"></div></div>
-      <div class="bar-val">${fmtNum(v)}</div>
-    </div>`;
+  const top=rows.slice(0,30), vals=top.map(r=>parseFloat(r[numCol])||0);
+  const maxAbs=Math.max(...vals.map(Math.abs),1e-9);
+  let h=`<div class="bar-chart"><div style="font-size:9px;color:var(--t2);letter-spacing:.8px;text-transform:uppercase;padding:2px 0 6px;flex-shrink:0">${fmtCol(numCol)}</div>`;
+  top.forEach(r=>{
+    const v=parseFloat(r[numCol])||0, pct=(Math.abs(v)/maxAbs*100).toFixed(1);
+    const lbl=lblCol?String(r[lblCol]).slice(0,10):'', cls=v>0?'pos':v<0?'neg':'';
+    h+=`<div class="bar-row"><div class="bar-label">${esc(lbl)}</div><div class="bar-track"><div class="bar-fill ${cls}" style="width:${pct}%"></div></div><div class="bar-val">${fmtNum(v)}</div></div>`;
   });
-  h += '</div>';
-  host.innerHTML = h;
-  $('chartPill') && ($('chartPill').textContent = 'bar · ' + fmtCol(numCol));
+  host.innerHTML=h+'</div>';
+  $('chartPill')&&($('chartPill').textContent='bar · '+fmtCol(numCol));
 }
 
-/* ─── Table ──────────────────────────────────────────────────────────────── */
 function buildTable(rows) {
   if (!rows.length) return '<div class="empty">No data</div>';
-  const cols = Object.keys(rows[0]).slice(0, 14);
-  let h = '<table><thead><tr>';
-  cols.forEach(c => {
-    h += `<th id="th-${esc(c)}" onclick="sortBy('${esc(c)}')">${fmtCol(c)}</th>`;
-  });
-  h += '</tr></thead><tbody>';
-  rows.slice(0, 300).forEach(r => {
-    h += '<tr>';
-    cols.forEach(c => {
-      let v = r[c], cls = '', extra = '';
-      if (v === null || v === undefined) { v = '—'; }
-      else if (typeof v === 'object') { v = JSON.stringify(v).slice(0, 36) + '…'; }
-      else if (typeof v === 'number' && isTimeKey(c)) {
-        extra = ' num';
-        v = fmtTime(v);
-      }
-      else if (typeof v === 'number') {
-        if (/change|pct|rate|percent|diff/i.test(c)) cls = v > 0 ? 'up' : 'dn';
-        extra = ' num';
-        v = Math.abs(v) >= 1000 ? fmt(v) : (v % 1 === 0 ? v.toString() : v.toFixed(4).replace(/\.?0+$/, ''));
-      }
-      h += `<td class="${cls}${extra}">${esc(String(v))}</td>`;
+  const cols=Object.keys(rows[0]).slice(0,14);
+  let h='<table><thead><tr>';
+  cols.forEach(c=>{ h+=`<th id="th-${esc(c)}" onclick="sortBy('${esc(c)}')">${fmtCol(c)}</th>`; });
+  h+='</tr></thead><tbody>';
+  rows.slice(0,300).forEach(r=>{
+    h+='<tr>';
+    cols.forEach(c=>{
+      let v=r[c],cls='',extra='';
+      if (v===null||v===undefined){v='—';}
+      else if (typeof v==='object'){v=JSON.stringify(v).slice(0,36)+'…';}
+      else if (typeof v==='number'&&isTimeKey(c)){extra=' num';v=fmtTime(v);}
+      else if (typeof v==='number'){if(/change|pct|rate|percent|diff/i.test(c))cls=v>0?'up':'dn';extra=' num';v=Math.abs(v)>=1000?fmt(v):(v%1===0?v.toString():v.toFixed(4).replace(/\.?0+$/,''));}
+      h+=`<td class="${cls}${extra}">${esc(String(v))}</td>`;
     });
-    h += '</tr>';
+    h+='</tr>';
   });
-  return h + '</tbody></table>';
+  return h+'</tbody></table>';
 }
 
 function sortBy(col) {
-  const th = $('th-' + col);
-  if (!th) return;
-  if (S.sort.col === col) S.sort.dir *= -1;
-  else { S.sort.col = col; S.sort.dir = 1; }
-  document.querySelectorAll('th').forEach(el => el.classList.remove('asc', 'desc'));
-  th.classList.add(S.sort.dir === 1 ? 'asc' : 'desc');
-  const tbody = th.closest('table')?.querySelector('tbody');
-  if (!tbody) return;
-  const idx = Array.from(th.parentElement.children).indexOf(th);
-  const trs = Array.from(tbody.querySelectorAll('tr'));
-  trs.sort((a, b) => {
-    const ta = a.cells[idx]?.textContent || '', tb = b.cells[idx]?.textContent || '';
-    const na = parseFloat(ta.replace(/[^0-9.\-]/g, '')), nb = parseFloat(tb.replace(/[^0-9.\-]/g, ''));
-    return (!isNaN(na) && !isNaN(nb)) ? (na - nb) * S.sort.dir : ta.localeCompare(tb) * S.sort.dir;
-  });
-  trs.forEach(r => tbody.appendChild(r));
+  const th=$('th-'+col); if(!th) return;
+  if(S.sort.col===col) S.sort.dir*=-1; else{S.sort.col=col;S.sort.dir=1;}
+  document.querySelectorAll('th').forEach(el=>el.classList.remove('asc','desc'));
+  th.classList.add(S.sort.dir===1?'asc':'desc');
+  const tbody=th.closest('table')?.querySelector('tbody'); if(!tbody) return;
+  const idx=Array.from(th.parentElement.children).indexOf(th);
+  const trs=Array.from(tbody.querySelectorAll('tr'));
+  trs.sort((a,b)=>{const ta=a.cells[idx]?.textContent||'',tb=b.cells[idx]?.textContent||'';const na=parseFloat(ta.replace(/[^0-9.\-]/g,'')),nb=parseFloat(tb.replace(/[^0-9.\-]/g,''));return(!isNaN(na)&&!isNaN(nb))?(na-nb)*S.sort.dir:ta.localeCompare(tb)*S.sort.dir;});
+  trs.forEach(r=>tbody.appendChild(r));
 }
 
-/* ─── Inspector ──────────────────────────────────────────────────────────── */
 function toggleInspector() {
-  const b = $('iBody'), a = $('iArrow');
-  b.style.display = b.style.display === 'block' ? 'none' : 'block';
-  a.textContent   = b.style.display === 'block'  ? '▼'    : '▶';
+  const b=$('iBody'),a=$('iArrow');
+  b.style.display=b.style.display==='block'?'none':'block';
+  a.textContent=b.style.display==='block'?'▼':'▶';
 }
 
-/* ─── Explorer ───────────────────────────────────────────────────────────── */
 function showExplorer() {
-  S.id = 'explorer'; setActive('explorer');
-  $('topTitle').textContent = 'API Explorer';
-  $('topPath').textContent  = 'POST /api/explore';
+  S.id='explorer'; setActive('explorer');
+  $('topTitle').textContent='API Explorer'; $('topPath').textContent='POST /api/explore';
   destroyChart();
-  $('content').innerHTML = `
-    <div class="explorer">
-      <div class="form-row">
-        <div class="field">
-          <label>Path</label>
-          <input id="expPath" value="/api/fundingRate/avg">
-        </div>
-        <div class="field">
-          <label>Params (JSON)</label>
-          <textarea id="expParams">{}</textarea>
-        </div>
-      </div>
-      <button class="btn btn-accent" onclick="runExplorer()">Execute</button>
-    </div>
-    <div id="explorerOut"></div>`;
+  $('content').innerHTML=`<div class="explorer"><div class="form-row"><div class="field"><label>Path</label><input id="expPath" value="/api/fundingRate/avg"></div><div class="field"><label>Params (JSON)</label><textarea id="expParams">{}</textarea></div></div><button class="btn btn-accent" onclick="runExplorer()">Execute</button></div><div id="explorerOut"></div>`;
 }
 
 async function runExplorer() {
-  let params = {};
-  try { params = JSON.parse($('expParams').value || '{}'); } catch { alert('Invalid JSON'); return; }
-  const path = $('expPath').value.trim();
-  const out  = $('explorerOut');
-  out.innerHTML = '<div class="skeleton" style="height:200px;margin-top:12px"></div>';
+  let params={};
+  try{params=JSON.parse($('expParams').value||'{}');}catch{alert('Invalid JSON');return;}
+  const path=$('expPath').value.trim(), out=$('explorerOut');
+  out.innerHTML='<div class="skeleton" style="height:200px;margin-top:12px"></div>';
   try {
-    const res  = await fetch('/api/explore', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path, params })
-    });
-    const json = await res.json();
-    if (!json.success) throw new Error(json.error);
-    out.innerHTML = `<div class="panel" style="margin-top:12px">
-      <div class="panel-head"><h3>${esc(json.url)}</h3></div>
-      <div class="inspector-body" style="display:block">${esc(JSON.stringify(json.data, null, 2))}</div>
-    </div>`;
-  } catch(err) {
-    out.innerHTML = `<div style="margin-top:12px">${errBox('Explorer error', err.message)}</div>`;
-  }
+    const res=await fetch('/api/explore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path,params})});
+    const json=await res.json(); if(!json.success) throw new Error(json.error);
+    out.innerHTML=`<div class="panel" style="margin-top:12px"><div class="panel-head"><h3>${esc(json.url)}</h3></div><div class="inspector-body" style="display:block">${esc(JSON.stringify(json.data,null,2))}</div></div>`;
+  } catch(err) { out.innerHTML=`<div style="margin-top:12px">${errBox('Explorer error',err.message)}</div>`; }
 }
 
-/* ─── Utilities ──────────────────────────────────────────────────────────── */
-function destroyChart() {
-  if (S.chart) { try { S.chart.remove(); } catch(e) {} S.chart = null; S.series = null; }
-}
+function destroyChart() { if(S.chart){try{S.chart.remove();}catch(e){}S.chart=null;S.series=null;} }
 
 function smartExtract(raw) {
-  if (Array.isArray(raw)) return raw;
-  if (!raw || typeof raw !== 'object') return [];
-  if (Array.isArray(raw.data)) return raw.data;
-  const found = [];
-  function dig(obj, d) {
-    if (d > 3) return;
-    for (const v of Object.values(obj)) {
-      if (Array.isArray(v) && v.length > 1) found.push(v);
-      else if (v && typeof v === 'object' && !Array.isArray(v)) dig(v, d + 1);
-    }
-  }
-  dig(raw, 0);
-  found.sort((a, b) => b.length - a.length);
-  return found[0] || [];
+  if(Array.isArray(raw)) return raw;
+  if(!raw||typeof raw!=='object') return [];
+  if(Array.isArray(raw.data)) return raw.data;
+  const found=[];
+  function dig(obj,d){if(d>3)return;for(const v of Object.values(obj)){if(Array.isArray(v)&&v.length>1)found.push(v);else if(v&&typeof v==='object'&&!Array.isArray(v))dig(v,d+1);}}
+  dig(raw,0); found.sort((a,b)=>b.length-a.length); return found[0]||[];
 }
 
 function normalize(rows) {
-  if (!rows.length) return rows;
-  if (Array.isArray(rows[0])) {
-    return rows.map(r => r.length === 2
-      ? { time: r[0], value: r[1] }
-      : Object.fromEntries(r.map((v, i) => ['v' + i, v]))
-    );
-  }
+  if(!rows.length) return rows;
+  if(Array.isArray(rows[0])) return rows.map(r=>r.length===2?{time:r[0],value:r[1]}:Object.fromEntries(r.map((v,i)=>['v'+i,v])));
   return rows;
 }
 
-/**
- * Convert CamelCase/ALLCAPS column names to readable title case.
- * e.g. "avgFundingRateByOiApr" → "Avg Funding Rate By OI Apr"
- *      "h24TurnoverUsd"         → "H24 Turnover USD"
- */
 function fmtCol(s) {
-  if (!s) return String(s);
-  s = String(s);
-  // ALL_CAPS with no lowercase: just title-case it, easier to read than shouting
-  if (s === s.toUpperCase() && s.length > 3) {
-    const lc = s.toLowerCase();
-    return (lc[0].toUpperCase() + lc.slice(1)).substring(0, 22);
-  }
-  // camelCase / PascalCase
-  s = s.replace(/([a-z\d])([A-Z])/g, '$1 $2')
-       .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
-       .replace(/_/g, ' ');
-  // Acronym normalisation
-  const fixes = {Usd:'USD', Oi:'OI', Rsi:'RSI', Apr:'APR', Btc:'BTC', Eth:'ETH', Sol:'SOL'};
-  s = s.replace(/\b(Usd|Oi|Rsi|Apr|Btc|Eth|Sol)\b/g, m => fixes[m] || m);
-  // Title-case remaining words
-  s = s.replace(/\b([a-z])/g, l => l.toUpperCase());
-  return s.substring(0, 22);
+  if(!s) return String(s); s=String(s);
+  if(s===s.toUpperCase()&&s.length>3){const lc=s.toLowerCase();return(lc[0].toUpperCase()+lc.slice(1)).substring(0,22);}
+  s=s.replace(/([a-z\d])([A-Z])/g,'$1 $2').replace(/([A-Z]+)([A-Z][a-z])/g,'$1 $2').replace(/_/g,' ');
+  const fixes={Usd:'USD',Oi:'OI',Rsi:'RSI',Apr:'APR',Btc:'BTC',Eth:'ETH',Sol:'SOL'};
+  s=s.replace(/\b(Usd|Oi|Rsi|Apr|Btc|Eth|Sol)\b/g,m=>fixes[m]||m);
+  s=s.replace(/\b([a-z])/g,l=>l.toUpperCase());
+  return s.substring(0,22);
 }
 
-/* Render unix timestamps (seconds or ms) as readable local date/time for table cells */
 function fmtTime(v) {
-  const ms = v > 1e11 ? v : v * 1000;
-  const d  = new Date(ms);
-  if (isNaN(d)) return String(v);
-  const sameDay = d.toDateString() === new Date().toDateString();
-  return sameDay
-    ? d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-    : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
-      d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  const ms=v>1e11?v:v*1000, d=new Date(ms);
+  if(isNaN(d)) return String(v);
+  const sameDay=d.toDateString()===new Date().toDateString();
+  return sameDay ? d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit',second:'2-digit'})
+                 : d.toLocaleDateString(undefined,{month:'short',day:'numeric'})+' '+d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
 }
 
 function fmt(n) {
-  if (n === undefined || n === null || isNaN(n)) return '—';
-  const a = Math.abs(n);
-  if (a >= 1e12) return (n / 1e12).toFixed(2) + ' T';
-  if (a >= 1e9)  return (n / 1e9).toFixed(2)  + ' B';
-  if (a >= 1e6)  return (n / 1e6).toFixed(2)  + ' M';
-  if (a >= 1e3)  return (n / 1e3).toFixed(1)  + ' K';
-  if (a < 0.0001 && a > 0) return n.toExponential(3);
-  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  if(n===undefined||n===null||isNaN(n)) return '—';
+  const a=Math.abs(n);
+  if(a>=1e12) return (n/1e12).toFixed(2)+' T';
+  if(a>=1e9)  return (n/1e9).toFixed(2)+' B';
+  if(a>=1e6)  return (n/1e6).toFixed(2)+' M';
+  if(a>=1e3)  return (n/1e3).toFixed(1)+' K';
+  if(a<0.0001&&a>0) return n.toExponential(3);
+  return n.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:4});
 }
 
-/* compact fmt for bar chart values */
 function fmtNum(n) {
-  if (isNaN(n)) return '—';
-  const a = Math.abs(n);
-  if (a >= 1e9) return (n / 1e9).toFixed(1) + 'B';
-  if (a >= 1e6) return (n / 1e6).toFixed(1) + 'M';
-  if (a >= 1e3) return (n / 1e3).toFixed(1) + 'K';
-  return n.toFixed(Math.abs(n) < 0.01 ? 5 : 2);
+  if(isNaN(n)) return '—'; const a=Math.abs(n);
+  if(a>=1e9) return (n/1e9).toFixed(1)+'B'; if(a>=1e6) return (n/1e6).toFixed(1)+'M';
+  if(a>=1e3) return (n/1e3).toFixed(1)+'K'; return n.toFixed(Math.abs(n)<0.01?5:2);
 }
 
-function esc(s) {
-  return String(s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
-function errBox(title, msg) {
-  return `<div class="error"><strong>${esc(title)}</strong>${esc(msg)}<br><br>
-    <small>Check the API connection and endpoint parameters. If encryption fails, set CAPI_EXTRA_KEYS.</small></div>`;
-}
+function errBox(title,msg) { return `<div class="error"><strong>${esc(title)}</strong>${esc(msg)}<br><br><small>Check the API connection and endpoint parameters. If encryption fails, set CAPI_EXTRA_KEYS.</small></div>`; }
 
 function $(id) { return document.getElementById(id); }
 
-/* ─── Clock ──────────────────────────────────────────────────────────────── */
-setInterval(() => { const c = $('clock'); if (c) c.textContent = new Date().toLocaleTimeString(); }, 1000);
+setInterval(()=>{ const c=$('clock'); if(c) c.textContent=new Date().toLocaleTimeString(); },1000);
 
 boot();
 </script>
 </body>
 </html>
-
 HTMLEOF
 
 EXPOSE 10000
