@@ -30,18 +30,14 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# ── No hardcoded keys in source ────────────────────────────────────────────────
-# Populate at deploy time: CAPI_EXTRA_KEYS="55=170b070da9654622,66=d6537d845a964081,77=863f08689c97435b"
 _CONSTANTS: dict[str, str] = {}
 for _pair in os.environ.get("CAPI_EXTRA_KEYS", "").split(","):
     if "=" in _pair:
         _k, _v = _pair.strip().split("=", 1)
         _CONSTANTS[_k.strip()] = _v.strip()
 
-# Runtime key0 cache populated on first successful decrypt for each v value
 _KEY0_CACHE: dict[str, str] = {}
 
-# Single browser at a time
 _BROWSER_SEM: asyncio.Semaphore | None = None
 
 
@@ -53,7 +49,6 @@ def _get_sem() -> asyncio.Semaphore:
 
 
 def _b64k(s: str) -> str | None:
-    """base64(s)[:16]  – returns None if result would not be 16 chars."""
     if not s:
         return None
     k = base64.b64encode(s.encode()).decode()[:16]
@@ -61,7 +56,6 @@ def _b64k(s: str) -> str | None:
 
 
 def _candidates(v: str, url: str, outer: dict) -> list[str]:
-    """Return ordered, deduplicated list of 16-char key0 strings to try."""
     seen: set[str] = set()
     out: list[str] = []
 
@@ -70,20 +64,14 @@ def _candidates(v: str, url: str, outer: dict) -> list[str]:
             seen.add(k0)
             out.append(k0)
 
-    # 1. Previously discovered key0 for this v (fastest path)
     push(_KEY0_CACHE.get(v))
-
-    # 2. Env-configured constant for this v
     push(_b64k(_CONSTANTS.get(v, "")))
 
-    # 3. Version-specific derivation
     if v == "0":
         push(_b64k(url))
     elif v == "1":
         push(_b64k(urlparse(url).path or url))
     else:
-        # v=2 and unknown: CG derives key from a time field in the outer JSON.
-        # Try every plausible field name and timestamp format.
         for fld in ("time", "ts", "timestamp", "t", "serverTime",
                     "server_time", "createTime", "requestTime", "stime"):
             val = outer.get(fld)
@@ -92,16 +80,14 @@ def _candidates(v: str, url: str, outer: dict) -> list[str]:
             push(_b64k(str(val)))
             if isinstance(val, (int, float)):
                 push(_b64k(str(int(val))))
-                if val > 1_000_000_000_000:          # looks like milliseconds
+                if val > 1_000_000_000_000:
                     push(_b64k(str(int(val) // 1000)))
-                elif val > 1_000_000_000:             # seconds — try ms form too
+                elif val > 1_000_000_000:
                     push(_b64k(str(int(val) * 1000)))
 
-    # 4. All env constants (brute-force over unknown v values)
     for c in _CONSTANTS.values():
         push(_b64k(c))
 
-    # 5. URL-based fallbacks (v=0/1 equivalents)
     push(_b64k(urlparse(url).path))
     push(_b64k(url))
 
@@ -129,11 +115,11 @@ def decrypt(body: str, user_b64: str, v: str, url: str = "") -> dict:
             result = _run(token, payload, k0)
             if i > 0:
                 logger.info("v=%s: candidate #%d succeeded (key0=%.6s…)", v, i, k0)
-            # Cache for fast path next time
             if v not in ("0", "1"):
                 _KEY0_CACHE[v] = k0
             return result
-        except Exception:
+        except Exception as e:
+            logger.info("v=%s candidate #%d (key0=%.6s…) failed: %s: %s", v, i, k0, type(e).__name__, e)
             continue
 
     raise ValueError(
@@ -142,16 +128,7 @@ def decrypt(body: str, user_b64: str, v: str, url: str = "") -> dict:
     )
 
 
-# ── Browser fallback ───────────────────────────────────────────────────────────
-
 async def _browser_fetch_decrypt(url: str, params: dict) -> dict:
-    """
-    Single headless Chromium page.  Visit coinglass.com to pick up session
-    cookies, then fetch the target endpoint from that context.  The server
-    may return a different (known) v when accessed from a real browser, or
-    organic page-load calls for the same path are captured directly.
-    Browser is opened and closed in one shot; max 1 concurrent.
-    """
     sem = _get_sem()
     async with sem:
         try:
@@ -187,19 +164,18 @@ async def _browser_fetch_decrypt(url: str, params: dict) -> dict:
             )
             page = await context.new_page()
 
-            # ── Stage 1: capture organic API calls during homepage load ────
             organic: dict[str, dict] = {}
 
             async def _on_resp(response: object) -> None:
                 try:
-                    if "capi.coinglass.com" not in response.url:  # type: ignore[attr-defined]
+                    if "capi.coinglass.com" not in response.url:
                         return
-                    u_h = response.headers.get("user")            # type: ignore[attr-defined]
-                    v_h = response.headers.get("v")               # type: ignore[attr-defined]
+                    u_h = response.headers.get("user")
+                    v_h = response.headers.get("v")
                     if not u_h or not v_h:
                         return
-                    body_txt = await response.text()              # type: ignore[attr-defined]
-                    organic[response.url] = {"user": u_h, "v": v_h, "body": body_txt}  # type: ignore[attr-defined]
+                    body_txt = await response.text()
+                    organic[response.url] = {"user": u_h, "v": v_h, "body": body_txt}
                 except Exception:
                     pass
 
@@ -211,11 +187,10 @@ async def _browser_fetch_decrypt(url: str, params: dict) -> dict:
                     wait_until="domcontentloaded",
                     timeout=28_000,
                 )
-                await asyncio.sleep(4)          # wait for initial XHR burst
+                await asyncio.sleep(4)
             except Exception as e:
                 logger.warning("CG homepage: %s", e)
 
-            # Check if the exact path was captured organically
             target_path = urlparse(full).path
             for cap_url, cap in organic.items():
                 if urlparse(cap_url).path == target_path:
@@ -227,14 +202,6 @@ async def _browser_fetch_decrypt(url: str, params: dict) -> dict:
                     except Exception:
                         pass
 
-            # ── Stage 2: context-level request — same cookies, no CORS ─────
-            # In-page fetch() to a different origin with custom headers
-            # (encryption, cache-ts-v2) forces a CORS preflight. If CG's CDN
-            # rejects it, the browser throws "TypeError: Failed to fetch"
-            # before any response is visible to JS — that's what prod logs
-            # showed. context.request shares the page's cookie jar (so any
-            # Cloudflare clearance / session cookies from page.goto() still
-            # apply) but runs outside the browser's fetch/CORS enforcement.
             try:
                 resp = await context.request.get(
                     full,
@@ -266,8 +233,6 @@ async def _browser_fetch_decrypt(url: str, params: dict) -> dict:
 
         return decrypt(body_text, user_h, v_h, full)
 
-
-# ── Public entry-point ─────────────────────────────────────────────────────────
 
 async def fetch_and_decrypt(
     url: str, params: dict | None = None, timeout: int = 15
